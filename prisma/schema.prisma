@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model represents a user in the system
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String?
+  role         Role      @default(STUDENT)
+  password     String
+  isVerified  Boolean  @default(false) // Флаг подтверждения email
+  verifyCode  String?  // 4-значный код подтверждения email
+  tests        Test[]
+  results      Result[]
+  createdGames Game[]    @relation("creator") // Games created by user
+  playingGames Game[]    @relation("players") // Games user is playing in
+  invites      Invite[]
+  messages     Message[] // Changed from Message to messages
+}
+
+// Role enum defines the possible roles a user can have
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+// Test model represents a test created by a user
+model Test {
+  id        String     @id @default(uuid())
+  title     String
+  creator   User       @relation(fields: [creatorId], references: [id])
+  creatorId String
+  questions Question[]
+  results   Result[]
+}
+
+// Question model represents a question in a test
+model Question {
+  id             String       @id @default(uuid())
+  test           Test         @relation(fields: [testId], references: [id])
+  testId         String
+  text           String
+  type           QuestionType
+  options        String[]
+  correctAnswers String[]
+  explanation    String?
+  image          String?
+  multipleChoice Boolean      @default(false)
+}
+
+// QuestionType enum defines the types of questions available
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
+}
+
+// Result model represents the result of a test for a user
+model Result {
+  id     String @id @default(uuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+  test   Test   @relation(fields: [testId], references: [id])
+  testId String
+  score  Int
+}
+
+// Game model represents a game created by a user
+model Game {
+  id        String   @id @default(uuid())
+  title     String
+  creator   User     @relation("creator", fields: [creatorId], references: [id])
+  creatorId String
+  isPublic  Boolean  @default(false)
+  players   User[]   @relation("players")
+  chat      Chat?
+  invites   Invite[]
+}
+
+// Chat model represents a chat associated with a game
+model Chat {
+  id       String    @id @default(uuid())
+  game     Game      @relation(fields: [gameId], references: [id])
+  gameId   String    @unique
+  messages Message[]
+}
+
+// Message model represents a message in a chat
+model Message {
+  id       String @id @default(uuid())
+  chat     Chat   @relation(fields: [chatId], references: [id])
+  chatId   String
+  sender   User   @relation(fields: [senderId], references: [id])
+  senderId String
+  content  String
+}
+
+// Invite model represents an invitation to a game
+model Invite {
+  id     String  @id @default(uuid())
+  game   Game    @relation(fields: [gameId], references: [id])
+  gameId String
+  email  String
+  token  String  @unique
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+}
