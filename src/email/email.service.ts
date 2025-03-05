@@ -14,13 +14,12 @@ export class EmailService {
 		})
 	}
 
-	async sendPasswordReset(email: string, token: string): Promise<void> {
+	async sendPasswordReset(email: string, code: string): Promise<void> {
 		await this.mailerService.sendMail({
 			to: email,
 			subject: 'Password Reset Request',
-			text: `Click the following link to reset your password: ${process.env.APP_URL}/reset-password?token=${token}`,
-			html: `<p>Click the following link to reset your password:</p>
-             <a href="${process.env.APP_URL}/reset-password?token=${token}">Reset Password</a>`,
+			text: `reset your password, Your verification code: ${code}`,
+			html: `<p>reset your password, Your verification code: <strong>${code}</strong></p>`,
 		})
 	}
 }
