@@ -1,9 +1,10 @@
 import { JwtAuthGuard } from '@/src/auth/jwtAuth.guard'
-import { CreateTestDto, UpdateTestDto } from '@/src/dto/quiz.dto'
+import { CreateTestDto, UpdateTestDto, AddQuestionDto } from '@/src/dto/quiz.dto'
 import { QuizService } from '@/src/quiz/quiz.service'
 import { Roles } from '@/src/quiz/role.decorator'
 import { RoleGuard } from '@/src/quiz/role.guard'
-import { Body, Controller, Delete, Get, Param, Patch, Post, Request, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Request, UseGuards, Res } from '@nestjs/common'
+import { Response } from 'express';
 
 @Controller('tests')
 @UseGuards(JwtAuthGuard)
@@ -13,9 +14,20 @@ export class QuizController {
 	@Post()
 	@UseGuards(RoleGuard)
 	@Roles('TEACHER', 'STUDENT')
-	create(@Request() req, @Body() dto: CreateTestDto) {
-		return this.quizService.create(req.user.id, dto)
+	async createTest(@Request() req, @Body() dto: CreateTestDto) {
+		return this.quizService.createTest(req.user.id, dto)
 	}
+
+	@Post(':testId/questions')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER', 'STUDENT')
+	async addQuestion(@Param('testId') testId: string, @Request() req, @Body() dto: AddQuestionDto) {
+		return this.quizService.addQuestion(testId, req.user.id, dto)
+	}
+
+	// create(@Request() req, @Body() dto: CreateTestDto) {
+	// 	return this.quizService.create(req.user.id, dto)
+	// }
 
 
 	@Get(':id')
@@ -69,4 +81,18 @@ export class QuizController {
     async getTestResults(@Param('attemptId') attemptId: string) {
         return this.quizService.getTestResults(attemptId);
     }
+
+
+	@Get(':attemptId/export-results')
+    async exportCompletedTest(@Param('attemptId') attemptId: string, @Res() res: Response) {
+        return this.quizService.exportCompletedTestToPDF(attemptId, res);
+    }
+
+    // 📄 Экспорт теста в PDF (без ответов)
+    @Get(':testId/export')
+    async exportTest(@Param('testId') testId: string, @Res() res: Response) {
+        return this.quizService.exportTestToPDF(testId, res);
+    }
 }
+
+
