@@ -4,7 +4,7 @@ import { QuizService } from '@/src/quiz/quiz.service'
 import { Roles } from '@/src/quiz/role.decorator'
 import { RoleGuard } from '@/src/quiz/role.guard'
 import { Body, Controller, Delete, Get, Param, Patch, Post, Request, UseGuards, Res } from '@nestjs/common'
-import { Response } from 'express';
+import { Response } from 'express'
 
 @Controller('tests')
 @UseGuards(JwtAuthGuard)
@@ -62,37 +62,82 @@ export class QuizController {
 	}
 
 	@Post(':testId/start')
-    async startTest(@Param('testId') testId: string, @Body('userId') userId: string) {
-        return this.quizService.startTest(userId, testId);
-    }
+	async startTest(@Param('testId') testId: string, @Body('userId') userId: string) {
+		return this.quizService.startTest(userId, testId)
+	}
 
-    // 2️⃣ Завершение теста и проверка ответов
-    @Post(':attemptId/submit')
-    async submitTest(
-        @Param('attemptId') attemptId: string,
-        @Body('userId') userId: string,
-        @Body('answers') answers: { questionId: string; selectedAnswers: string[] }[]
-    ) {
-        return this.quizService.submitTest(userId, attemptId, answers);
-    }
+	@Patch(':attemptId/save-progress')
+	async saveProgress(
+		@Param('attemptId') attemptId: string,
+		@Request() req,
+		@Body() answers: { questionId: string; selectedAnswers: string[] }[]
+	) {
+		return this.quizService.saveProgress(req.user.id, attemptId, answers)
+	}
 
-    // 3️⃣ Получение результатов теста
-    @Get(':attemptId/results')
-    async getTestResults(@Param('attemptId') attemptId: string) {
-        return this.quizService.getTestResults(attemptId);
-    }
+	@Patch(':testId/auto-save')
+	async autoSaveTest(
+		@Param('testId') testId: string,
+		@Request() req,
+		@Body() dto: UpdateTestDto
+	) {
+		return this.quizService.autoSaveTest(req.user.id, testId, dto)
+	}
+
+	// 2️⃣ Завершение теста и проверка ответов
+	@Post(':attemptId/submit')
+	async submitTest(
+		@Param('attemptId') attemptId: string,
+		@Body('userId') userId: string,
+		@Body('answers') answers: { questionId: string; selectedAnswers: string[] }[]
+	) {
+		return this.quizService.submitTest(userId, attemptId, answers)
+	}
+
+	// 3️⃣ Получение результатов теста
+	@Get(':attemptId/results')
+	async getTestResults(@Param('attemptId') attemptId: string) {
+		return this.quizService.getTestResults(attemptId)
+	}
 
 
 	@Get(':attemptId/export-results')
-    async exportCompletedTest(@Param('attemptId') attemptId: string, @Res() res: Response) {
-        return this.quizService.exportCompletedTestToPDF(attemptId, res);
-    }
+	async exportCompletedTest(@Param('attemptId') attemptId: string, @Res() res: Response) {
+		return this.quizService.exportCompletedTestToPDF(attemptId, res)
+	}
 
-    // 📄 Экспорт теста в PDF (без ответов)
-    @Get(':testId/export')
-    async exportTest(@Param('testId') testId: string, @Res() res: Response) {
-        return this.quizService.exportTestToPDF(testId, res);
-    }
+	// 📄 Экспорт теста в PDF (без ответов)
+	@Get(':testId/export')
+	async exportTest(@Param('testId') testId: string, @Res() res: Response) {
+		return this.quizService.exportTestToPDF(testId, res)
+	}
+
+	@Get('pending')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER')
+	async getPendingAnswers(@Request() req) {
+		return this.quizService.getPendingAnswers(req.user.id)
+	}
+
+	// 2️⃣ Проверить открытый вопрос и изменить его статус
+	@Patch(':answerId/review')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER')
+	async reviewAnswer(
+		@Request() req,
+		@Param('answerId') answerId: string,
+		@Body('isCorrect') isCorrect: boolean
+	) {
+		return this.quizService.reviewAnswer(req.user.id, answerId, isCorrect)
+	}
+
+	// 3️⃣ Пересчитать балл попытки
+	@Patch(':attemptId/recalculate-score')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER')
+	async recalculateAttemptScore(@Param('attemptId') attemptId: string) {
+		return this.quizService.recalculateAttemptScore(attemptId)
+	}
 }
 
 
