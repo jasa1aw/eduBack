@@ -1,9 +1,9 @@
 import { JwtAuthGuard } from '@/src/auth/jwtAuth.guard'
-import { CreateTestDto, UpdateTestDto, AddQuestionDto } from '@/src/dto/quiz.dto'
+import { AddQuestionDto, CreateTestDto, UpdateTestDto } from '@/src/dto/quiz.dto'
 import { QuizService } from '@/src/quiz/quiz.service'
 import { Roles } from '@/src/quiz/role.decorator'
 import { RoleGuard } from '@/src/quiz/role.guard'
-import { Body, Controller, Delete, Get, Param, Patch, Post, Request, UseGuards, Res } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Request, Res, UseGuards } from '@nestjs/common'
 import { Response } from 'express'
 
 @Controller('tests')
@@ -110,6 +110,13 @@ export class QuizController {
 	@Get(':testId/export')
 	async exportTest(@Param('testId') testId: string, @Res() res: Response) {
 		return this.quizService.exportTestToPDF(testId, res)
+	}
+
+	@Get(':testId/export-with-answers')
+	// @UseGuards(RoleGuard)
+	// @Roles('TEACHER')  // Только для преподавателей
+	async exportTestWithAnswers(@Param('testId') testId: string, @Res() res: Response) {
+		return this.quizService.exportTestWithAnswersToPDF(testId, res)
 	}
 
 	@Get('pending')

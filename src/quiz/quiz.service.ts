@@ -1,10 +1,10 @@
 import { PrismaService } from '@/prisma/prisma.service'
-import { AnswerStatus } from '@prisma/client'
-import { CreateTestDto, AddQuestionDto, UpdateTestDto } from '@/src/dto/quiz.dto'
+import { AddQuestionDto, CreateTestDto, UpdateTestDto } from '@/src/dto/quiz.dto'
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
-import * as PDFDocument from 'pdfkit'
+import { AnswerStatus } from '@prisma/client'
 import { Response } from 'express'
 import * as path from 'path'
+import * as PDFDocument from 'pdfkit'
 
 @Injectable()
 export class QuizService {
@@ -476,12 +476,16 @@ export class QuizService {
 	}
 
 	async exportCompletedTestToPDF(attemptId: string, res: Response) {
+		// Получаем данные о попытке, тесте и ответах
 		const attempt = await this.prisma.attempt.findUnique({
 			where: { id: attemptId },
-			include: {
+			include:
+			{
 				test: { include: { questions: true } },
 				answers: { include: { question: true } },
-			},
+				user: { select: { name: true, email: true } },
+				results: { select: { score: true } }
+			}
 		})
 
 		if (!attempt) {
@@ -493,45 +497,101 @@ export class QuizService {
 		res.setHeader('Content-Disposition', `attachment; filename=test-results-${attempt.id}.pdf`)
 		doc.pipe(res)
 
-		// ✅ Указываем путь к шрифту, чтобы точно поддерживалась кириллица
+		// Загружаем шрифт для поддержки кириллицы
 		const fontPath = path.join(process.cwd(), 'src/utils/fonts/Arial.ttf')
 		doc.font(fontPath)
 
-		// ✅ Заголовок теста
+		// Заголовок и информация о тесте
 		doc.fontSize(20).text(`Результаты теста: ${attempt.test.title}`, { align: 'center' })
-		doc.moveDown(2)
+		doc.moveDown()
+		doc.fontSize(12)
+			.text(`Студент: ${attempt.user.name}`)
+			.text(`Email: ${attempt.user.email}`)
+			.text(`Дата: ${attempt.endTime ? new Date(attempt.endTime).toLocaleString() : 'Не завершен'}`)
+			.text(`Итоговый балл: ${attempt.results[0]?.score || 0}%`)
+			.moveDown(2)
 
-		// ✅ Обход всех вопросов и ответов
+		// Обход всех вопросов и ответов
 		attempt.answers.forEach((answer, index) => {
-			doc.fontSize(14).text(`${index + 1}. ${answer.question.text}`, { underline: true })
+			// Вопрос
+			doc.fontSize(14)
+				.fillColor('black')
+				.text(`${index + 1}. ${answer.question.text}`, { underline: true })
 			doc.moveDown(0.5)
 
-			// ✅ Выводим все варианты ответа
-			answer.question.options.forEach((option, optIndex) => {
-				doc.fontSize(12).text(`${String.fromCharCode(65 + optIndex)}) ${option}`)
-			})
+			// Обработка разных типов вопросов
+			switch (answer.question.type) {
+				case 'MULTIPLE_CHOICE':
+					// Варианты ответов
+					answer.question.options.forEach((option, optIndex) => {
+						const isSelected = answer.selectedAnswers.includes(option)
+						const isCorrect = answer.question.correctAnswers.includes(option)
 
+						doc.fontSize(12)
+							.fillColor(isSelected && isCorrect ? 'green' :
+								isSelected && !isCorrect ? 'red' :
+									!isSelected && isCorrect ? 'gray' : 'black')
+							.text(`${String.fromCharCode(65 + optIndex)}) ${option} ${isSelected ? '✓' : ''
+								} ${!isSelected && isCorrect ? '(правильный ответ)' : ''
+								}`)
+					})
+					break
+
+				case 'SHORT_ANSWER':
+					doc.fontSize(12)
+						.fillColor('blue')
+						.text(`Ответ студента: ${answer.userAnswer || 'Нет ответа'}`)
+						.fillColor('green')
+						.text(`Правильный ответ: ${answer.question.correctAnswers.join(' или ')}`)
+					break
+
+				case 'OPEN_QUESTION':
+					doc.fontSize(12)
+						.fillColor('blue')
+						.text(`Ответ студента: ${answer.userAnswer || 'Нет ответа'}`)
+						.fillColor('gray')
+						.text(`Статус: ${answer.status === 'CHECKED'
+							? (answer.isCorrect ? '✓ Верно' : '✗ Неверно')
+							: 'Ожидает проверки'
+							}`)
+					break
+			}
+
+			// Вес вопроса и полученные баллы
 			doc.moveDown(0.5)
+				.fontSize(10)
+				.fillColor('gray')
+				.text(`Вес вопроса: ${answer.question.weight || 1} балл(ов)`)
 
-			// ✅ Формируем ответ пользователя
-			const userAnswerText = answer.selectedAnswers.map(sel =>
-				`${String.fromCharCode(65 + answer.question.options.indexOf(sel))}) ${sel}`
-			).join(', ')
+			if (answer.question.type !== 'OPEN_QUESTION' || answer.status === 'CHECKED') {
+				doc.text(`Получено баллов: ${answer.isCorrect ? (answer.question.weight || 1) : 0}`)
+			}
 
-			// ✅ Формируем правильный ответ
-			const correctAnswerText = answer.question.correctAnswers.map(correct =>
-				`${String.fromCharCode(65 + answer.question.options.indexOf(correct))}) ${correct}`
-			).join(', ')
+			// Если есть пояснение к вопросу
+			if (answer.question.explanation) {
+				doc.moveDown(0.5)
+					.fillColor('gray')
+					.text('Пояснение:', { underline: true })
+					.text(answer.question.explanation)
+			}
 
-			doc.fontSize(12).fillColor('blue').text(`Ваш ответ: ${userAnswerText}`)
-			doc.fontSize(12).fillColor('green').text(`Правильный ответ: ${correctAnswerText}`)
-
-			// ✅ Отображаем статус (верно или нет)
-			doc.fontSize(12).fillColor(answer.isCorrect ? 'green' : 'red')
-				.text(`Статус: ${answer.isCorrect ? '✅ Верно' : '❌ Неверно'}`)
-
-			doc.fillColor('black').moveDown(1.5)
+			doc.moveDown(2)
 		})
+
+		// Итоговая статистика
+		doc.fontSize(14)
+			.fillColor('black')
+			.text('Итоговая статистика:', { underline: true })
+
+		const totalQuestions = attempt.answers.length
+		const correctAnswers = attempt.answers.filter(a => a.isCorrect).length
+		const pendingAnswers = attempt.answers.filter(a => a.question.type === 'OPEN_QUESTION' && a.status !== 'CHECKED').length
+
+		doc.fontSize(12)
+			.text(`Всего вопросов: ${totalQuestions}`)
+			.text(`Правильных ответов: ${correctAnswers}`)
+			.text(`Ожидают проверки: ${pendingAnswers}`)
+			.text(`Итоговый балл: ${attempt.results[0]?.score || 0}%`)
 
 		doc.end()
 	}
@@ -577,6 +637,123 @@ export class QuizService {
 		doc.end()
 	}
 
+	async exportTestWithAnswersToPDF(testId: string, res: Response) {
+		const test = await this.prisma.test.findUnique({
+			where: { id: testId },
+			include: { questions: true },
+		})
 
+		if (!test) {
+			throw new NotFoundException('Тест не найден')
+		}
 
+		const doc = new PDFDocument()
+		res.setHeader('Content-Type', 'application/pdf')
+		res.setHeader('Content-Disposition', `attachment; filename=test-with-answers-${test.id}.pdf`)
+		doc.pipe(res)
+
+		// Загружаем шрифт для кириллицы
+		const fontPath = path.join(process.cwd(), 'src/utils/fonts/Arial.ttf')
+		doc.font(fontPath)
+
+		// Заголовок теста
+		doc.fontSize(20).text(`Тест: ${test.title} (с ответами)`, { align: 'center' })
+		doc.moveDown()
+		doc.fontSize(12)
+			.text(`Количество вопросов: ${test.questions.length}`)
+			.text(`Ограничение по времени: ${test.timeLimit ? `${test.timeLimit} минут` : 'Нет'}`)
+			.text(`Максимальное количество попыток: ${test.maxAttempts}`)
+			.moveDown(2)
+
+		// Обход всех вопросов
+		test.questions.forEach((question, index) => {
+			// Вопрос и его тип
+			doc.fontSize(14)
+				.fillColor('black')
+				.text(`${index + 1}. ${question.text}`, { underline: true })
+			doc.fontSize(10)
+				.fillColor('gray')
+				.text(`Тип вопроса: ${question.type === 'MULTIPLE_CHOICE' ? 'Множественный выбор' :
+					question.type === 'SHORT_ANSWER' ? 'Короткий ответ' :
+						'Открытый вопрос'
+					}`)
+			doc.moveDown(0.5)
+
+			// Обработка разных типов вопросов
+			switch (question.type) {
+				case 'MULTIPLE_CHOICE':
+					// Варианты ответов
+					question.options.forEach((option, optIndex) => {
+						const isCorrect = question.correctAnswers.includes(option)
+						doc.fontSize(12)
+							.fillColor(isCorrect ? 'green' : 'black')
+							.text(`${String.fromCharCode(65 + optIndex)}) ${option} ${isCorrect ? '✓' : ''
+								}`)
+					})
+					break
+
+				case 'SHORT_ANSWER':
+					doc.fontSize(12)
+						.fillColor('green')
+						.text('Правильные ответы:')
+						.text(question.correctAnswers.join(' или '))
+					break
+
+				case 'OPEN_QUESTION':
+					if (question.correctAnswers && question.correctAnswers.length > 0) {
+						doc.fontSize(12)
+							.fillColor('green')
+							.text('Примерный ответ:')
+							.text(question.correctAnswers[0])
+					} else {
+						doc.fontSize(12)
+							.fillColor('gray')
+							.text('Требуется ручная проверка')
+					}
+					break
+			}
+
+			// Вес вопроса
+			doc.moveDown(0.5)
+				.fontSize(10)
+				.fillColor('gray')
+				.text(`Вес вопроса: ${question.weight || 1} балл(ов)`)
+
+			// Пояснение к вопросу
+			if (question.explanation) {
+				doc.moveDown(0.5)
+					.fillColor('blue')
+					.text('Пояснение:', { underline: true })
+					.text(question.explanation)
+			}
+
+			// Если есть изображение
+			if (question.image) {
+				doc.moveDown(0.5)
+					.fillColor('gray')
+					.text('(К вопросу прилагается изображение)')
+			}
+
+			doc.moveDown(2)
+		})
+
+		// // Итоговая информация
+		// doc.fontSize(12)
+		// 	.fillColor('black')
+		// 	.text('Информация о тесте:', { underline: true })
+		// 	.moveDown(0.5)
+
+		// const totalWeight = test.questions.reduce((sum, q) => sum + (q.weight || 1), 0)
+		// const multipleChoice = test.questions.filter(q => q.type === 'MULTIPLE_CHOICE').length
+		// const shortAnswer = test.questions.filter(q => q.type === 'SHORT_ANSWER').length
+		// const openQuestion = test.questions.filter(q => q.type === 'OPEN_QUESTION').length
+
+		// doc.fontSize(10)
+		// 	.text(`Общий вес теста: ${totalWeight} баллов`)
+		// 	.text(`Вопросов с множественным выбором: ${multipleChoice}`)
+		// 	.text(`Вопросов с коротким ответом: ${shortAnswer}`)
+		// 	.text(`Открытых вопросов: ${openQuestion}`)
+
+		doc.end()
+	}
 }

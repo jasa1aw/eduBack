@@ -127,7 +127,6 @@ model Result {
 // 🎮 Game model
 model Game {
   id        String   @id @default(uuid())
-  title     String
   creator   User     @relation("creator", fields: [creatorId], references: [id], onDelete: Cascade)
   creatorId String
   isPublic  Boolean  @default(false)
@@ -167,7 +166,7 @@ model Invite {
   id     String  @id @default(uuid())
   game   Game    @relation("GameInvites", fields: [gameId], references: [id], onDelete: Cascade) // ✅ Исправлено
   gameId String
-  email  String
+  email  String?
   token  String  @unique
   user   User?   @relation("UserInvites", fields: [userId], references: [id], onDelete: Cascade) // ✅ Исправлено
   userId String?
