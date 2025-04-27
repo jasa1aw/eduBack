@@ -9,20 +9,23 @@ datasource db {
 
 // 👤 User model
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  name         String?
-  role         Role      @default(STUDENT)
-  password     String
-  isVerified   Boolean   @default(false)
-  verifyCode   String?
-  tests        Test[]
-  results      Result[]
-  attempts     Attempt[]
-  createdGames Game[]    @relation("creator")
-  playingGames Game[]    @relation("players")
-  invites      Invite[]  @relation("UserInvites") // ✅ Явное указание связи
-  messages     Message[]
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  name               String?
+  role               Role                @default(STUDENT)
+  password           String
+  isVerified         Boolean             @default(false)
+  verifyCode         String?
+  tests              Test[]
+  results            Result[]
+  attempts           Attempt[]
+  createdGames       Game[]              @relation("creator")
+  playingGames       Game[]              @relation("players")
+  invites            Invite[]            @relation("UserInvites") // ✅ Явное указание связи
+  messages           Message[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  emailVerifications EmailVerification[]
 }
 
 // 🎭 Role enum
@@ -53,7 +56,7 @@ model Question {
   id             String          @id @default(uuid())
   test           Test            @relation(fields: [testId], references: [id], onDelete: Cascade)
   testId         String
-  text           String        @default("New question")
+  text           String          @default("New question")
   type           QuestionType
   options        String[]
   correctAnswers String[]
@@ -88,21 +91,20 @@ model Attempt {
   status    AttemptStatus   @default(IN_PROGRESS)
   answers   AttemptAnswer[]
   results   Result[]
-  progress  Json       @default("{}")
+  progress  Json            @default("{}")
 }
 
 enum AnswerStatus {
-  PENDING    // Ожидает проверки
-  CHECKED    // Проверен
+  PENDING // Ожидает проверки
+  CHECKED // Проверен
 }
-
 
 // 📝 Ответы пользователя в попытке
 model AttemptAnswer {
-  id              String   @id @default(uuid())
-  attempt         Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  id              String       @id @default(uuid())
+  attempt         Attempt      @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   attemptId       String
-  question        Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question        Question     @relation(fields: [questionId], references: [id], onDelete: Cascade)
   questionId      String
   selectedAnswers String[] // Выбранные ответы
   userAnswer      String? // Ответ пользователя
@@ -120,7 +122,7 @@ model Result {
   test      Test    @relation(fields: [testId], references: [id], onDelete: Cascade)
   testId    String
   attempt   Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade) // ✅ Добавляем связь с попыткой
-  attemptId String 
+  attemptId String
   score     Int
 }
 
@@ -146,14 +148,14 @@ model Chat {
 
 // 📨 Message model
 model Message {
-  id         String  @id @default(uuid())
-  chat       Chat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
   chatId     String
-  sender     User    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
   senderId   String
   content    String
-  readStatus Boolean @default(false)
-  createdAt DateTime @default(now())
+  readStatus Boolean  @default(false)
+  createdAt  DateTime @default(now())
 }
 
 enum InviteStatus {
@@ -161,14 +163,24 @@ enum InviteStatus {
   ACCEPTED
   DECLINED
 }
+
 // 📩 Invite model
 model Invite {
-  id     String  @id @default(uuid())
-  game   Game    @relation("GameInvites", fields: [gameId], references: [id], onDelete: Cascade) // ✅ Исправлено
+  id     String       @id @default(uuid())
+  game   Game         @relation("GameInvites", fields: [gameId], references: [id], onDelete: Cascade) // ✅ Исправлено
   gameId String
   email  String?
-  token  String  @unique
-  user   User?   @relation("UserInvites", fields: [userId], references: [id], onDelete: Cascade) // ✅ Исправлено
+  token  String       @unique
+  user   User?        @relation("UserInvites", fields: [userId], references: [id], onDelete: Cascade) // ✅ Исправлено
   userId String?
   status InviteStatus @default(PENDING)
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
 }
