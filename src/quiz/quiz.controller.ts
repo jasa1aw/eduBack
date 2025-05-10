@@ -29,22 +29,23 @@ export class QuizController {
 	// 	return this.quizService.create(req.user.id, dto)
 	// }
 
-
+	@Get('my-tests')
+	findAllByUser(@Request() req) {
+		return this.quizService.findAllByUser(req.user.id)
+	}
+	
 	@Get(':id')
 	findOne(@Param('id') id: string) {
 		return this.quizService.findOne(id)
 	}
 
-	@Get('user/:userId')
-	findAllByUser(@Param('userId') userId: string) {
-		return this.quizService.findAllByUser(userId)
-	}
+	
 
 	@Patch(':id')
 	@UseGuards(RoleGuard)
 	@Roles('TEACHER', 'STUDENT')
-	update(@Param('id') testId: string, @Request() req, @Body() dto: UpdateTestDto) {
-		return this.quizService.update(testId, req.user.id, dto)
+	update(@Param('id') id: string, @Request() req, @Body() dto: UpdateTestDto) {
+		return this.quizService.update(id, req.user.id, dto)
 	}
 
 	@Delete(':id')
@@ -62,15 +63,15 @@ export class QuizController {
 	}
 
 	@Post(':testId/start')
-	async startTest(@Param('testId') testId: string, @Body('userId') userId: string) {
-		return this.quizService.startTest(userId, testId)
+	async startTest(@Param('testId') testId: string, @Request() req) {
+		return this.quizService.startTest(req.user.id, testId)
 	}
 
-	@Patch(':attemptId/save-progress')
+	@Post(':attemptId/progress')
 	async saveProgress(
 		@Param('attemptId') attemptId: string,
 		@Request() req,
-		@Body() answers: { questionId: string; selectedAnswers: string[] }[]
+		@Body() answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
 	) {
 		return this.quizService.saveProgress(req.user.id, attemptId, answers)
 	}
@@ -88,10 +89,10 @@ export class QuizController {
 	@Post(':attemptId/submit')
 	async submitTest(
 		@Param('attemptId') attemptId: string,
-		@Body('userId') userId: string,
-		@Body('answers') answers: { questionId: string; selectedAnswers: string[] }[]
+		@Request() req,
+		@Body() answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
 	) {
-		return this.quizService.submitTest(userId, attemptId, answers)
+		return this.quizService.submitTest(req.user.id, attemptId, answers)
 	}
 
 	// 3️⃣ Получение результатов теста
@@ -101,21 +102,21 @@ export class QuizController {
 	}
 
 
-	@Get(':attemptId/export-results')
-	async exportCompletedTest(@Param('attemptId') attemptId: string, @Res() res: Response) {
+	@Get(':attemptId/export')
+	async exportCompletedTestToPDF(@Param('attemptId') attemptId: string, @Res() res: Response) {
 		return this.quizService.exportCompletedTestToPDF(attemptId, res)
 	}
 
 	// 📄 Экспорт теста в PDF (без ответов)
 	@Get(':testId/export')
-	async exportTest(@Param('testId') testId: string, @Res() res: Response) {
+	async exportTestToPDF(@Param('testId') testId: string, @Res() res: Response) {
 		return this.quizService.exportTestToPDF(testId, res)
 	}
 
 	@Get(':testId/export-with-answers')
 	// @UseGuards(RoleGuard)
 	// @Roles('TEACHER')  // Только для преподавателей
-	async exportTestWithAnswers(@Param('testId') testId: string, @Res() res: Response) {
+	async exportTestWithAnswersToPDF(@Param('testId') testId: string, @Res() res: Response) {
 		return this.quizService.exportTestWithAnswersToPDF(testId, res)
 	}
 

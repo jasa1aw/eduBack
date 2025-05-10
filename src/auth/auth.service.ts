@@ -141,12 +141,15 @@ export class AuthService {
 				email: user.email,
 				role: user.role,
 			},
+			token: token
 		})
 	}
 
 	async logout(res: Response) {
 		res.clearCookie('token')
-		return { message: 'Logged out' }
+		return res.json({
+			message: 'Logged out'
+		})
 	}
 
 	async verifyEmail(dto: VerifyEmailDto) {

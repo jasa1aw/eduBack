@@ -2,6 +2,7 @@ import { PrismaService } from '@/prisma/prisma.service'
 import { AddQuestionDto, CreateTestDto, UpdateTestDto } from '@/src/dto/quiz.dto'
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { AnswerStatus } from '@prisma/client'
+
 import { Response } from 'express'
 import * as path from 'path'
 import * as PDFDocument from 'pdfkit'
@@ -50,8 +51,9 @@ export class QuizService {
 	}
 
 	async findAllByUser(userId: string) {
+		
 		if (!userId) throw new ForbiddenException('Unauthorized user')
-
+		// console.log(userId)
 		const tests = await this.prisma.test.findMany({
 			where: { creatorId: userId },
 			include: { questions: true },
