@@ -126,11 +126,15 @@ export class AuthService {
 		}
 
 		// Генерация токена
-		const token = this.jwtService.sign({ id: user.id, role: user.role })
+		const token = this.jwtService.sign(
+			{ id: user.id, role: user.role },
+			{ expiresIn: '30d' }
+		)
 		res.cookie('token', token, {
 			httpOnly: true,
 			secure: false,
 			sameSite: 'lax',
+			maxAge: 30 * 24 * 60 * 60 * 1000
 		})
 
 		return res.json({
@@ -173,7 +177,7 @@ export class AuthService {
 	async getProfile(userId: string) {
 		const user = await this.prisma.user.findUniqueOrThrow({
 			where: { id: userId },
-			select: {id: true, name: true, email: true, role: true },
+			select: { id: true, name: true, email: true, role: true },
 		})
 		return user
 	}
