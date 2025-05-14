@@ -5,7 +5,7 @@ import { Type } from 'class-transformer'
 export class AddQuestionDto {
 	@IsString()
 	@IsNotEmpty()
-	text: string
+	title: string
 
 	@IsArray()
 	@IsOptional()
@@ -27,6 +27,10 @@ export class AddQuestionDto {
 	@IsOptional()
 	weight?: number
 
+	@IsInt()
+	@IsOptional()
+	timeLimit?: number
+	
 	@IsNotEmpty()
 	type: QuestionType
 }
@@ -44,10 +48,6 @@ export class CreateTestDto {
 	@IsOptional()
 	maxAttempts?: number
 
-	@IsInt()
-	@IsOptional()
-	timeLimit?: number
-
 	@IsBoolean()
 	@IsOptional()
 	showAnswers?: boolean
@@ -60,7 +60,7 @@ export class UpdateQuestionDto {
 
 	@IsString()
 	@IsNotEmpty()
-	text: string
+	title: string
 
 	@IsArray()
 	@IsOptional()
@@ -82,6 +82,10 @@ export class UpdateQuestionDto {
 	@IsOptional()
 	weight?: number
 
+	@IsInt()
+	@IsOptional()
+	timeLimit?: number
+	
 	@IsNotEmpty()
 	type: QuestionType
 }
@@ -98,10 +102,6 @@ export class UpdateTestDto {
 	@IsInt()
 	@IsOptional()
 	maxAttempts?: number
-
-	@IsInt()
-	@IsOptional()
-	timeLimit?: number
 
 	@IsBoolean()
 	@IsOptional()

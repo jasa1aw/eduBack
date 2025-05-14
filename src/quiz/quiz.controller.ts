@@ -3,8 +3,11 @@ import { AddQuestionDto, CreateTestDto, UpdateTestDto } from '@/src/dto/quiz.dto
 import { QuizService } from '@/src/quiz/quiz.service'
 import { Roles } from '@/src/quiz/role.decorator'
 import { RoleGuard } from '@/src/quiz/role.guard'
-import { Body, Controller, Delete, Get, Param, Patch, Post, Request, Res, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Request, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
 import { Response } from 'express'
+import { diskStorage } from 'multer'
+import { extname } from 'path'
 
 @Controller('tests')
 @UseGuards(JwtAuthGuard)
@@ -21,8 +24,30 @@ export class QuizController {
 	@Post(':testId/questions')
 	@UseGuards(RoleGuard)
 	@Roles('TEACHER', 'STUDENT')
-	async addQuestion(@Param('testId') testId: string, @Request() req, @Body() dto: AddQuestionDto) {
-		return this.quizService.addQuestion(testId, req.user.id, dto)
+	@UseInterceptors(
+		FileInterceptor('File', {
+			storage: diskStorage({
+				destination: 'uploads/questions',
+				filename: (req, file, cb) => {
+					const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
+					cb(null, `question-${uniqueSuffix}${extname(file.originalname)}`)
+				}
+			}),
+			fileFilter: (req, file, cb) => {
+				if (!file.originalname.match(/\.(jpg|jpeg|png|gif)$/)) {
+					return cb(new Error('Only image files are allowed!'), false)
+				}
+				cb(null, true)
+			}
+		})
+	)
+	async addQuestion(
+		@Param('testId') testId: string,
+		@Request() req,
+		@Body() dto: AddQuestionDto,
+		@UploadedFile() imageFile?: Express.Multer.File
+	) {
+		return this.quizService.addQuestion(testId, req.user.id, dto, imageFile)
 	}
 
 	// create(@Request() req, @Body() dto: CreateTestDto) {
@@ -33,13 +58,13 @@ export class QuizController {
 	findAllByUser(@Request() req) {
 		return this.quizService.findAllByUser(req.user.id)
 	}
-	
+
 	@Get(':id')
 	findOne(@Param('id') id: string) {
 		return this.quizService.findOne(id)
 	}
 
-	
+
 
 	@Patch(':id')
 	@UseGuards(RoleGuard)

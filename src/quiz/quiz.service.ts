@@ -4,12 +4,20 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { AnswerStatus } from '@prisma/client'
 
 import { Response } from 'express'
+import * as fs from 'fs'
 import * as path from 'path'
 import * as PDFDocument from 'pdfkit'
 
 @Injectable()
 export class QuizService {
-	constructor(private prisma: PrismaService) { }
+	private readonly uploadDir = 'uploads/questions'
+
+	constructor(private prisma: PrismaService) {
+		// Создаем директорию для загрузки, если она не существует
+		if (!fs.existsSync(this.uploadDir)) {
+			fs.mkdirSync(this.uploadDir, { recursive: true })
+		}
+	}
 
 	async createTest(userId: string, dto: CreateTestDto) {
 		if (!userId) throw new ForbiddenException('Unauthorized user')
@@ -20,13 +28,12 @@ export class QuizService {
 				creatorId: userId,
 				isDraft: dto.isDraft ?? true,
 				maxAttempts: dto.maxAttempts ?? 1,
-				timeLimit: dto.timeLimit,
 				showAnswers: dto.showAnswers ?? false,
 			},
 		})
 	}
 
-	async addQuestion(testId: string, userId: string, dto: AddQuestionDto) {
+	async addQuestion(testId: string, userId: string, dto: AddQuestionDto, imageFile?: Express.Multer.File) {
 		// Проверка: существует ли тест?
 		const test = await this.prisma.test.findUnique({
 			where: { id: testId },
@@ -36,22 +43,45 @@ export class QuizService {
 		if (!test) throw new NotFoundException('Test not found')
 		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to add questions to this test')
 
+		let imagePath: string | null = null
+		if (imageFile) {
+			console.log('Processing image file:', imageFile) // Добавляем лог для отладки
+
+			// Генерируем уникальное имя файла
+			const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
+			const ext = path.extname(imageFile.originalname)
+			const filename = `question-${uniqueSuffix}${ext}`
+
+			// Сохраняем файл
+			const filePath = path.join(this.uploadDir, filename)
+			fs.writeFileSync(filePath, imageFile.buffer)
+
+			// Сохраняем относительный путь для базы данных
+			imagePath = path.join(this.uploadDir, filename)
+			console.log('Saved image path:', imagePath) // Добавляем лог для отладки
+		}
+
+		const questionData = {
+			testId,
+			title: dto.title,
+			type: dto.type,
+			options: dto.options ?? [],
+			correctAnswers: dto.correctAnswers ?? [],
+			explanation: dto.explanation,
+			image: imagePath,
+			weight: typeof dto.weight === 'string' ? parseInt(dto.weight) || 1 : dto.weight || 1,
+			timeLimit: typeof dto.timeLimit === 'string' ? parseInt(dto.timeLimit) || 10 : dto.timeLimit || 10
+		}
+
+		console.log('Creating question with data:', questionData) // Добавляем лог для отладки
+
 		return this.prisma.question.create({
-			data: {
-				testId,
-				text: dto.text,
-				type: dto.type,
-				options: dto.options ?? [],
-				correctAnswers: dto.correctAnswers ?? [],
-				explanation: dto.explanation,
-				image: dto.image,
-				weight: dto.weight ?? 1,
-			},
+			data: questionData
 		})
 	}
 
 	async findAllByUser(userId: string) {
-		
+
 		if (!userId) throw new ForbiddenException('Unauthorized user')
 		// console.log(userId)
 		const tests = await this.prisma.test.findMany({
@@ -98,7 +128,6 @@ export class QuizService {
 					title: dto.title,
 					isDraft: dto.isDraft ?? true,
 					maxAttempts: dto.maxAttempts,
-					timeLimit: dto.timeLimit,
 					showAnswers: dto.showAnswers ?? false,
 				},
 			}),
@@ -115,13 +144,14 @@ export class QuizService {
 					this.prisma.question.update({
 						where: { id: q.id, testId },
 						data: {
-							text: q.text,
+							title: q.title,
 							type: q.type,
 							options: q.options,
 							correctAnswers: q.correctAnswers,
 							explanation: q.explanation,
 							image: q.image,
-							weight: q.weight,
+							weight: typeof q.weight === 'string' ? parseInt(q.weight) || 1 : q.weight || 1,
+							timeLimit: typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) || 10 : q.timeLimit || 10
 						},
 					})
 				),
@@ -131,7 +161,12 @@ export class QuizService {
 				.filter(q => !q.id)
 				.map(q =>
 					this.prisma.question.create({
-						data: { ...q, testId },
+						data: {
+							...q,
+							testId,
+							weight: typeof q.weight === 'string' ? parseInt(q.weight) || 1 : q.weight || 1,
+							timeLimit: typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) || 10 : q.timeLimit || 10
+						},
 					})
 				),
 		])
@@ -316,9 +351,13 @@ export class QuizService {
 					const normalizedSelected = userAnswer?.trim().toLowerCase() || ''
 					const normalizedCorrect = question.correctAnswers.map(a => a.trim().toLowerCase())
 					isCorrect = normalizedCorrect.includes(normalizedSelected)
+				} else if (question.type === 'TRUE_FALSE') {
+					isCorrect = selectedAnswers?.[0]?.toLowerCase() === question.correctAnswers[0]?.toLowerCase()
 				} else if (question.type === 'OPEN_QUESTION') {
 					isCorrect = null // Открытые вопросы проверяются вручную, балл не ставим
 				}
+			} else {
+				throw new Error('Something bad')
 			}
 
 			return {
@@ -369,7 +408,6 @@ export class QuizService {
 				title: dto.title ?? test.title,
 				isDraft: true,
 				maxAttempts: dto.maxAttempts ?? test.maxAttempts,
-				timeLimit: dto.timeLimit ?? test.timeLimit,
 				showAnswers: dto.showAnswers ?? test.showAnswers,
 			},
 		})
@@ -394,7 +432,7 @@ export class QuizService {
 				questionId: true,
 				userAnswer: true, // ✅ Добавляем поле userAnswer вместо selectedAnswers
 				question: {
-					select: { text: true },
+					select: { title: true },
 				},
 			},
 		})
@@ -518,7 +556,7 @@ export class QuizService {
 			// Вопрос
 			doc.fontSize(14)
 				.fillColor('black')
-				.text(`${index + 1}. ${answer.question.text}`, { underline: true })
+				.text(`${index + 1}. ${answer.question.title}`, { underline: true })
 			doc.moveDown(0.5)
 
 			// Обработка разных типов вопросов
@@ -545,6 +583,14 @@ export class QuizService {
 						.text(`Ответ студента: ${answer.userAnswer || 'Нет ответа'}`)
 						.fillColor('green')
 						.text(`Правильный ответ: ${answer.question.correctAnswers.join(' или ')}`)
+					break
+
+				case 'TRUE_FALSE':
+					doc.fontSize(12)
+						.fillColor('blue')
+						.text(`Ответ студента: ${answer.selectedAnswers[0] || 'Нет ответа'}`)
+						.fillColor('green')
+						.text(`Правильный ответ: ${answer.question.correctAnswers[0]}`)
 					break
 
 				case 'OPEN_QUESTION':
@@ -625,7 +671,7 @@ export class QuizService {
 		// ✅ Обход всех вопросов
 		test.questions.forEach((question, index) => {
 			// ✅ Вопрос
-			doc.fontSize(14).text(`${index + 1}. ${question.text}`, { underline: true })
+			doc.fontSize(14).text(`${index + 1}. ${question.title}`, { underline: true })
 			doc.moveDown(0.5)
 
 			// ✅ Варианты ответа (A, B, C, ...)
@@ -663,7 +709,6 @@ export class QuizService {
 		doc.moveDown()
 		doc.fontSize(12)
 			.text(`Количество вопросов: ${test.questions.length}`)
-			.text(`Ограничение по времени: ${test.timeLimit ? `${test.timeLimit} минут` : 'Нет'}`)
 			.text(`Максимальное количество попыток: ${test.maxAttempts}`)
 			.moveDown(2)
 
@@ -672,7 +717,7 @@ export class QuizService {
 			// Вопрос и его тип
 			doc.fontSize(14)
 				.fillColor('black')
-				.text(`${index + 1}. ${question.text}`, { underline: true })
+				.text(`${index + 1}. ${question.title}`, { underline: true })
 			doc.fontSize(10)
 				.fillColor('gray')
 				.text(`Тип вопроса: ${question.type === 'MULTIPLE_CHOICE' ? 'Множественный выбор' :
@@ -699,6 +744,13 @@ export class QuizService {
 						.fillColor('green')
 						.text('Правильные ответы:')
 						.text(question.correctAnswers.join(' или '))
+					break
+
+				case 'TRUE_FALSE':
+					doc.fontSize(12)
+						.fillColor('green')
+						.text('Правильный ответ:')
+						.text(question.correctAnswers[0])
 					break
 
 				case 'OPEN_QUESTION':
