@@ -46,7 +46,6 @@ model Test {
   results     Result[]
   attempts    Attempt[]
   maxAttempts Int?       @default(1)
-  timeLimit   Int?
   showAnswers Boolean    @default(false)
   createdAt   DateTime   @default(now())
 }
@@ -56,13 +55,14 @@ model Question {
   id             String          @id @default(uuid())
   test           Test            @relation(fields: [testId], references: [id], onDelete: Cascade)
   testId         String
-  text           String          @default("New question")
+  title          String          @default("New question")
   type           QuestionType
   options        String[]
   correctAnswers String[]
   explanation    String?
   image          String?
   weight         Int?            @default(1)
+  timeLimit      Int             @default(10)
   attemptAnswers AttemptAnswer[]
 }
 
@@ -71,6 +71,7 @@ enum QuestionType {
   MULTIPLE_CHOICE
   SHORT_ANSWER
   OPEN_QUESTION
+  TRUE_FALSE
 }
 
 enum AttemptStatus {
