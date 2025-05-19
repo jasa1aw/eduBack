@@ -25,7 +25,7 @@ export class QuizController {
 	@UseGuards(RoleGuard)
 	@Roles('TEACHER', 'STUDENT')
 	@UseInterceptors(
-		FileInterceptor('File', {
+		FileInterceptor('image', {
 			storage: diskStorage({
 				destination: 'uploads/questions',
 				filename: (req, file, cb) => {
@@ -45,9 +45,9 @@ export class QuizController {
 		@Param('testId') testId: string,
 		@Request() req,
 		@Body() dto: AddQuestionDto,
-		@UploadedFile() imageFile?: Express.Multer.File
+		@UploadedFile() image?: Express.Multer.File
 	) {
-		return this.quizService.addQuestion(testId, req.user.id, dto, imageFile)
+		return this.quizService.addQuestion(testId, req.user.id, dto, image)
 	}
 
 	// create(@Request() req, @Body() dto: CreateTestDto) {
@@ -80,11 +80,11 @@ export class QuizController {
 		return this.quizService.deleteTest(id)
 	}
 
-	@Delete(':testId/questions/:questionId')
+	@Delete('questions/:questionId')
 	@UseGuards(RoleGuard)
 	@Roles('TEACHER', 'STUDENT')
-	removeQuestion(@Param('testId') testId: string, @Param('questionId') questionId: string) {
-		return this.quizService.deleteQuestion(testId, questionId)
+	removeQuestion(@Param('questionId') questionId: string) {
+		return this.quizService.deleteQuestion(questionId)
 	}
 
 	@Post(':testId/start')
@@ -127,22 +127,23 @@ export class QuizController {
 	}
 
 
-	@Get(':attemptId/export')
+	@Get(':attemptId/export-attempt')
 	async exportCompletedTestToPDF(@Param('attemptId') attemptId: string, @Res() res: Response) {
 		return this.quizService.exportCompletedTestToPDF(attemptId, res)
 	}
 
 	// 📄 Экспорт теста в PDF (без ответов)
-	@Get(':testId/export')
-	async exportTestToPDF(@Param('testId') testId: string, @Res() res: Response) {
-		return this.quizService.exportTestToPDF(testId, res)
-	}
+	
 
 	@Get(':testId/export-with-answers')
 	// @UseGuards(RoleGuard)
 	// @Roles('TEACHER')  // Только для преподавателей
 	async exportTestWithAnswersToPDF(@Param('testId') testId: string, @Res() res: Response) {
 		return this.quizService.exportTestWithAnswersToPDF(testId, res)
+	}
+	@Get(':testId/export')
+	async exportTestToPDF(@Param('testId') testId: string, @Res() res: Response) {
+		return this.quizService.exportTestToPDF(testId, res)
 	}
 
 	@Get('pending')

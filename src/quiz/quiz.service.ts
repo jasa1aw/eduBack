@@ -33,31 +33,22 @@ export class QuizService {
 		})
 	}
 
-	async addQuestion(testId: string, userId: string, dto: AddQuestionDto, imageFile?: Express.Multer.File) {
+	async addQuestion(testId: string, userId: string, dto: AddQuestionDto, image?: Express.Multer.File) {
 		// Проверка: существует ли тест?
 		const test = await this.prisma.test.findUnique({
 			where: { id: testId },
 			select: { creatorId: true }
 		})
-
+		console.log(image)
 		if (!test) throw new NotFoundException('Test not found')
 		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to add questions to this test')
 
 		let imagePath: string | null = null
-		if (imageFile) {
-			console.log('Processing image file:', imageFile) // Добавляем лог для отладки
+		if (image) {
+			console.log('Processing image file:', image) // Добавляем лог для отладки
 
-			// Генерируем уникальное имя файла
-			const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
-			const ext = path.extname(imageFile.originalname)
-			const filename = `question-${uniqueSuffix}${ext}`
-
-			// Сохраняем файл
-			const filePath = path.join(this.uploadDir, filename)
-			fs.writeFileSync(filePath, imageFile.buffer)
-
-			// Сохраняем относительный путь для базы данных
-			imagePath = path.join(this.uploadDir, filename)
+			// Файл уже сохранён Multer, просто сохраняем путь
+			imagePath = image.path // если нужен относительный путь, используйте path.relative(process.cwd(), image.path)
 			console.log('Saved image path:', imagePath) // Добавляем лог для отладки
 		}
 
@@ -178,12 +169,12 @@ export class QuizService {
 		return this.prisma.test.delete({ where: { id: id } })
 	}
 
-	async deleteQuestion(testId: string, questionId: string) {
+	async deleteQuestion(questionId: string) {
 		const question = await this.prisma.question.findUnique({
-			where: { id: questionId, testId },
+			where: { id: questionId },
 		})
 
-		if (!question) throw new NotFoundException('Question not found in this test')
+		if (!question) throw new NotFoundException('Question not found')
 
 		return this.prisma.question.delete({ where: { id: questionId } })
 	}
@@ -563,17 +554,20 @@ export class QuizService {
 			switch (answer.question.type) {
 				case 'MULTIPLE_CHOICE':
 					// Варианты ответов
+					doc.fontSize(12)
+						.fillColor('black')
+						.text('Варианты ответов:')
 					answer.question.options.forEach((option, optIndex) => {
-						const isSelected = answer.selectedAnswers.includes(option)
-						const isCorrect = answer.question.correctAnswers.includes(option)
-
-						doc.fontSize(12)
-							.fillColor(isSelected && isCorrect ? 'green' :
-								isSelected && !isCorrect ? 'red' :
-									!isSelected && isCorrect ? 'gray' : 'black')
-							.text(`${String.fromCharCode(65 + optIndex)}) ${option} ${isSelected ? '✓' : ''
-								} ${!isSelected && isCorrect ? '(правильный ответ)' : ''
-								}`)
+						doc.text(`${String.fromCharCode(65 + optIndex)}) ${option}`)
+					})
+					doc.moveDown(0.5)
+						.fillColor('green')
+						.text('Правильные ответы:')
+					answer.question.correctAnswers.forEach((correctAnswer) => {
+						const optionIndex = answer.question.options.indexOf(correctAnswer)
+						if (optionIndex !== -1) {
+							doc.text(`Правильный ответ: ${String.fromCharCode(65 + optionIndex)}) ${correctAnswer}`)
+						}
 					})
 					break
 
@@ -683,6 +677,7 @@ export class QuizService {
 		})
 
 		doc.end()
+		return doc
 	}
 
 	async exportTestWithAnswersToPDF(testId: string, res: Response) {
@@ -730,13 +725,18 @@ export class QuizService {
 			switch (question.type) {
 				case 'MULTIPLE_CHOICE':
 					// Варианты ответов
+					doc.fontSize(12)
+						.fillColor('black')
+						.text('Варианты ответов:')
 					question.options.forEach((option, optIndex) => {
-						const isCorrect = question.correctAnswers.includes(option)
-						doc.fontSize(12)
-							.fillColor(isCorrect ? 'green' : 'black')
-							.text(`${String.fromCharCode(65 + optIndex)}) ${option} ${isCorrect ? '✓' : ''
-								}`)
+						doc.text(`${String.fromCharCode(65 + optIndex)}) ${option}`)
 					})
+					doc.moveDown(0.5)
+						.fillColor('green')
+						.text('Правильные ответы:')
+					question.correctAnswers.forEach((correctAnswer, id) => {
+							doc.text(`${String.fromCharCode(65 + id)}) ${correctAnswer}`
+						)})
 					break
 
 				case 'SHORT_ANSWER':
