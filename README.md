@@ -97,3 +97,91 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+# EduBack - Educational Backend API
+
+## Test Taking Modes
+
+This API supports two distinct modes for taking tests:
+
+### 🎯 Practice Mode
+Practice mode is designed for learning and skill improvement without consequences:
+- **No attempt limits**: Users can take practice tests multiple times
+- **No time restrictions**: Tests can be completed at the user's own pace  
+- **Immediate feedback**: All answers, explanations, and correct solutions are shown
+- **Simple scoring**: Basic percentage calculation based on correct answers
+
+**Endpoints:**
+- `POST /tests/:testId/start-practice` - Start a practice test
+- `POST /tests/:attemptId/submit-practice` - Submit practice test answers
+- `GET /tests/:attemptId/practice-results` - Get detailed practice results
+
+### 📝 Exam Mode  
+Exam mode provides a formal testing environment with strict controls:
+- **Attempt limits**: Respects `maxAttempts` setting from test configuration
+- **Time restrictions**: Enforces `timeLimit` with automatic timeout penalties
+- **Conditional feedback**: Results shown only if `showAnswers` is enabled
+- **Weighted scoring**: Uses question weights for more accurate assessment
+- **Timeout penalties**: 10-point deduction for submissions exceeding time limit
+
+**Endpoints:**
+- `POST /tests/:testId/start-exam` - Start an exam test (requires `examMode: true`)
+- `POST /tests/:attemptId/submit-exam` - Submit exam answers  
+- `GET /tests/:attemptId/exam-results` - Get exam results (respects showAnswers setting)
+
+### 🔧 Universal Endpoints
+These endpoints work with both practice and exam modes:
+- `POST /tests/:attemptId/progress` - Save progress during test taking
+
+## Response Examples
+
+### Practice Mode Submission Response:
+```json
+{
+  "message": "Practice test completed successfully",
+  "score": 85,
+  "totalQuestions": 10,
+  "correctAnswers": 8,
+  "incorrectAnswers": 2,
+  "showAnswers": true,
+  "detailedResults": [
+    {
+      "questionId": "uuid",
+      "questionTitle": "Question text",
+      "questionType": "MULTIPLE_CHOICE",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswers": ["A", "C"],
+      "userSelectedAnswers": ["A", "B"], 
+      "isCorrect": false,
+      "explanation": "Explanation text"
+    }
+  ]
+}
+```
+
+### Exam Mode Submission Response:
+```json
+{
+  "message": "Exam submitted successfully", 
+  "score": 78,
+  "status": "COMPLETED",
+  "timeElapsed": 25,
+  "timeLimit": 30,
+  "showAnswers": false,
+  "detailedResults": null
+}
+```
+
+## Test Configuration
+
+To enable exam mode, set `examMode: true` when creating/updating a test:
+
+```json
+{
+  "title": "Final Exam",
+  "examMode": true,
+  "maxAttempts": 3,
+  "timeLimit": 60,
+  "showAnswers": false
+}
+```

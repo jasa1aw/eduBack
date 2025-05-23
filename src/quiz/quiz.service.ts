@@ -1,12 +1,69 @@
 import { PrismaService } from '@/prisma/prisma.service'
-import { AddQuestionDto, CreateTestDto, UpdateTestDto } from '@/src/dto/quiz.dto'
+import { AddQuestionDto, CreateTestDto, UpdateQuestionDto, UpdateTestDto } from '@/src/dto/quiz.dto'
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
-import { AnswerStatus } from '@prisma/client'
+import { AnswerStatus, AttemptStatus, QuestionType } from '@prisma/client'
 
 import { Response } from 'express'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as PDFDocument from 'pdfkit'
+
+// Interface for detailed test results
+export interface DetailedTestResult {
+	questionId: string
+	questionTitle: string
+	questionType: QuestionType
+	options: string[]
+	correctAnswers: string[]
+	userSelectedAnswers: string[]
+	userAnswer: string | null
+	isCorrect: boolean | null
+	explanation: string | null
+}
+
+// Interface for practice test submission response
+export interface PracticeTestResponse {
+	message: string
+	score: number
+	totalQuestions: number
+	correctAnswers: number
+	incorrectAnswers: number
+	detailedResults: DetailedTestResult[]
+	showAnswers: true
+}
+
+// Interface for exam test submission response
+export interface ExamTestResponse {
+	message: string
+	score: number
+	status: AttemptStatus
+	timeElapsed: number
+	timeLimit: number
+	showAnswers: boolean
+	detailedResults: DetailedTestResult[] | null
+}
+
+// Interface for practice test results response
+export interface PracticeTestResultsResponse {
+	testTitle: string
+	score: number
+	totalQuestions: number
+	correctAnswers: number
+	incorrectAnswers: number
+	showAnswers: true
+	mode: 'PRACTICE'
+	results: DetailedTestResult[]
+}
+
+// Interface for exam test results response  
+export interface ExamTestResultsResponse {
+	testTitle: string
+	score: number
+	status: AttemptStatus
+	showAnswers: boolean
+	mode: 'EXAM'
+	results?: DetailedTestResult[]
+}
 
 @Injectable()
 export class QuizService {
@@ -19,56 +76,46 @@ export class QuizService {
 		}
 	}
 
-	async createTest(userId: string, dto: CreateTestDto) {
-		if (!userId) throw new ForbiddenException('Unauthorized user')
+	// Helper method to process an answer and determine if it's correct
+	private processAnswer(question: any, selectedAnswers?: string[], userAnswer?: string): boolean | null {
+		if (!question) return false
 
-		return this.prisma.test.create({
-			data: {
-				title: dto.title,
-				creatorId: userId,
-				isDraft: dto.isDraft ?? true,
-				maxAttempts: dto.maxAttempts ?? 1,
-				showAnswers: dto.showAnswers ?? false,
-			},
-		})
+		switch (question.type) {
+			case 'MULTIPLE_CHOICE':
+				const sortedSelected = (selectedAnswers || []).slice().sort()
+				const sortedCorrect = question.correctAnswers.slice().sort()
+				return sortedSelected.length === sortedCorrect.length &&
+					sortedSelected.every((v, i) => v === sortedCorrect[i])
+
+			case 'SHORT_ANSWER':
+				const normalizedSelected = userAnswer?.trim().toLowerCase() || ''
+				const normalizedCorrect = question.correctAnswers.map(a => a.trim().toLowerCase())
+				return normalizedCorrect.includes(normalizedSelected)
+
+			case 'TRUE_FALSE':
+				return selectedAnswers?.[0]?.toLowerCase() === question.correctAnswers[0]?.toLowerCase()
+
+			case 'OPEN_QUESTION':
+				return null // Requires manual checking
+
+			default:
+				return false
+		}
 	}
 
-	async addQuestion(testId: string, userId: string, dto: AddQuestionDto, image?: Express.Multer.File) {
-		// Проверка: существует ли тест?
-		const test = await this.prisma.test.findUnique({
-			where: { id: testId },
-			select: { creatorId: true }
+	// Helper method to calculate score for an attempt
+	private async calculateScore(attemptId: string): Promise<number> {
+		const answers = await this.prisma.attemptAnswer.findMany({
+			where: { attemptId },
+			select: { isCorrect: true, question: { select: { weight: true } } },
 		})
-		console.log(image)
-		if (!test) throw new NotFoundException('Test not found')
-		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to add questions to this test')
 
-		let imagePath: string | null = null
-		if (image) {
-			console.log('Processing image file:', image) // Добавляем лог для отладки
+		const totalWeight = answers.reduce((sum, a) => sum + (a.question.weight || 1), 0)
+		const correctWeight = answers
+			.filter(a => a.isCorrect)
+			.reduce((sum, a) => sum + (a.question.weight || 1), 0)
 
-			// Файл уже сохранён Multer, просто сохраняем путь
-			imagePath = image.path // если нужен относительный путь, используйте path.relative(process.cwd(), image.path)
-			console.log('Saved image path:', imagePath) // Добавляем лог для отладки
-		}
-
-		const questionData = {
-			testId,
-			title: dto.title,
-			type: dto.type,
-			options: dto.options ?? [],
-			correctAnswers: dto.correctAnswers ?? [],
-			explanation: dto.explanation,
-			image: imagePath,
-			weight: typeof dto.weight === 'string' ? parseInt(dto.weight) || 1 : dto.weight || 1,
-			timeLimit: typeof dto.timeLimit === 'string' ? parseInt(dto.timeLimit) || 10 : dto.timeLimit || 10
-		}
-
-		console.log('Creating question with data:', questionData) // Добавляем лог для отладки
-
-		return this.prisma.question.create({
-			data: questionData
-		})
+		return totalWeight > 0 ? Math.round((correctWeight / totalWeight) * 100) : 0
 	}
 
 	async findAllByUser(userId: string) {
@@ -93,93 +140,127 @@ export class QuizService {
 		return test
 	}
 
-	async update(testId: string, userId: string, dto: UpdateTestDto) {
+	async createTest(userId: string, dto: CreateTestDto) {
+		if (!userId) throw new ForbiddenException('Unauthorized user')
+
+		return this.prisma.test.create({
+			data: {
+				title: dto.title,
+				creatorId: userId,
+				isDraft: dto.isDraft ?? true,
+				maxAttempts: dto.maxAttempts ?? 1,
+				showAnswers: dto.showAnswers ?? false,
+				timeLimit: typeof dto.timeLimit === 'string' ? parseInt(dto.timeLimit) || 10 : dto.timeLimit || 10,
+				examMode: dto.examMode ?? false,
+			},
+			include: {
+				questions: true
+			}
+		})
+	}
+
+	async addQuestion(testId: string, userId: string, dto: AddQuestionDto, image?: Express.Multer.File) {
+		const test = await this.prisma.test.findUnique({
+			where: { id: testId },
+			select: { creatorId: true }
+		})
+		if (!test) throw new NotFoundException('Test not found')
+		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to add questions to this test')
+		let imagePath: string | null = null
+		if (image) {
+			imagePath = image.path
+		}
+		const questionData = {
+			testId,
+			title: dto.title,
+			type: dto.type,
+			options: dto.options ?? [],
+			correctAnswers: dto.correctAnswers ?? [],
+			explanation: dto.explanation,
+			image: imagePath,
+			weight: typeof dto.weight === 'string' ? parseInt(dto.weight) || 1 : dto.weight || 1,
+		}
+		return this.prisma.question.create({
+			data: questionData
+		})
+	}
+
+	async updateTest(testId: string, userId: string, dto: UpdateTestDto) {
+		const test = await this.prisma.test.findUnique({
+			where: { id: testId },
+			select: { creatorId: true }
+		})
+
+		if (!test) throw new NotFoundException('Test not found')
+		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to edit this test')
+
+		// Only update test properties, not questions
+		return this.prisma.test.update({
+			where: { id: testId },
+			data: dto
+		})
+	}
+
+	async updateQuestion(questionId: string, userId: string, questionData: UpdateQuestionDto) {
+		// First find the question and its test to check permissions
+		const question = await this.prisma.question.findUnique({
+			where: { id: questionId },
+			select: {
+				testId: true,
+				test: { select: { creatorId: true } }
+			}
+		})
+
+		if (!question) throw new NotFoundException('Question not found')
+		if (question.test.creatorId !== userId) throw new ForbiddenException('Not allowed to edit this question')
+
+		return this.prisma.question.update({
+			where: { id: questionId },
+			data: questionData
+		})
+	}
+
+	async deleteTest(id: string, userId: string) {
+		const test = await this.prisma.test.findUnique({
+			where: { id: id },
+			select: { creatorId: true }
+		})
+
+		if (!test) throw new NotFoundException('Test not found')
+		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to edit this test')
+
+		return {
+			message: 'Test deleted successfully',
+			status: 'success'
+		}
+	}
+
+	async deleteQuestion(questionId: string, userId: string) {
+		const question = await this.prisma.question.findUnique({
+			where: { id: questionId },
+			select: {
+				testId: true,
+				test: { select: { creatorId: true } }
+			}
+		})
+
+		if (!question) throw new NotFoundException('Question not found')
+		if (question.test.creatorId !== userId) throw new ForbiddenException('Not allowed to edit this question')
+
+		return {
+			message: 'Test deleted successfully',
+			status: 'success'
+		}
+	}
+
+	async startPracticeTest(userId: string, testId: string) {
 		const test = await this.prisma.test.findUnique({
 			where: { id: testId },
 			include: { questions: true },
 		})
 
 		if (!test) throw new NotFoundException('Test not found')
-		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to edit this test')
 
-		// Список текущих вопросов
-		const existingQuestionIds = test.questions.map(q => q.id)
-		const incomingQuestions = dto.questions ?? []
-		const incomingQuestionIds = incomingQuestions.map(q => q.id).filter(Boolean)
-
-		// Определяем удаленные вопросы
-		const questionsToDelete = existingQuestionIds.filter(id => !incomingQuestionIds.includes(id))
-
-		// Транзакция обновления
-		await this.prisma.$transaction([
-			// Обновляем сам тест
-			this.prisma.test.update({
-				where: { id: testId },
-				data: {
-					title: dto.title,
-					isDraft: dto.isDraft ?? true,
-					maxAttempts: dto.maxAttempts,
-					showAnswers: dto.showAnswers ?? false,
-				},
-			}),
-
-			// Удаляем вопросы (с проверкой testId)
-			this.prisma.question.deleteMany({
-				where: { id: { in: questionsToDelete }, testId },
-			}),
-
-			// Обновляем существующие вопросы (используем updateMany)
-			...incomingQuestions
-				.filter(q => q.id)
-				.map(q =>
-					this.prisma.question.update({
-						where: { id: q.id, testId },
-						data: {
-							title: q.title,
-							type: q.type,
-							options: q.options,
-							correctAnswers: q.correctAnswers,
-							explanation: q.explanation,
-							image: q.image,
-							weight: typeof q.weight === 'string' ? parseInt(q.weight) || 1 : q.weight || 1,
-							timeLimit: typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) || 10 : q.timeLimit || 10
-						},
-					})
-				),
-
-			// Добавляем новые вопросы (заменяем createMany на create)
-			...incomingQuestions
-				.filter(q => !q.id)
-				.map(q =>
-					this.prisma.question.create({
-						data: {
-							...q,
-							testId,
-							weight: typeof q.weight === 'string' ? parseInt(q.weight) || 1 : q.weight || 1,
-							timeLimit: typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) || 10 : q.timeLimit || 10
-						},
-					})
-				),
-		])
-
-		return this.findOne(testId)
-	}
-
-	async deleteTest(id: string) {
-		return this.prisma.test.delete({ where: { id: id } })
-	}
-
-	async deleteQuestion(questionId: string) {
-		const question = await this.prisma.question.findUnique({
-			where: { id: questionId },
-		})
-
-		if (!question) throw new NotFoundException('Question not found')
-
-		return this.prisma.question.delete({ where: { id: questionId } })
-	}
-
-	async startTest(userId: string, testId: string) {
 		const attempt = await this.prisma.attempt.create({
 			data: {
 				userId,
@@ -189,98 +270,47 @@ export class QuizService {
 			},
 		})
 
+		return { attemptId: attempt.id, test, mode: 'PRACTICE' }
+	}
+
+	async startExamTest(userId: string, testId: string) {
 		const test = await this.prisma.test.findUnique({
 			where: { id: testId },
 			include: { questions: true },
 		})
 
-		return { attemptId: attempt.id, test }
+		if (!test) throw new NotFoundException('Test not found')
+
+		// Check if test is configured for exam mode
+		if (!test.examMode) {
+			throw new ForbiddenException('This test is not configured for exam mode')
+		}
+
+		// Check if user has reached max attempts in exam mode
+		const attemptCount = await this.prisma.attempt.count({
+			where: {
+				userId,
+				testId,
+				status: { in: ['COMPLETED', 'TIMEOUT'] }
+			}
+		})
+
+		if (test.maxAttempts && attemptCount >= test.maxAttempts) {
+			throw new ForbiddenException('Maximum attempts reached for this test')
+		}
+
+		const attempt = await this.prisma.attempt.create({
+			data: {
+				userId,
+				testId,
+				startTime: new Date(),
+				status: 'IN_PROGRESS',
+			},
+		})
+
+		return { attemptId: attempt.id, test, mode: 'EXAM' }
 	}
 
-	// async saveProgress(userId: string, attemptId: string, answers: { questionId: string; selectedAnswers: string[] }[]) {
-	// 	const attempt = await this.prisma.attempt.findUnique({
-	// 		where: { id: attemptId, userId },
-	// 	})
-
-	// 	if (!attempt) throw new NotFoundException('Attempt not found')
-
-	// 	return this.prisma.attempt.update({
-	// 		where: { id: attemptId },
-	// 		data: {
-	// 			progress: JSON.stringify(answers),
-	// 		},
-	// 	})
-	// }
-	// async submitTest(
-	// 	userId: string,
-	// 	attemptId: string,
-	// 	answers: { questionId: string; selectedAnswers: string[] }[]
-	// ) {
-	// 	if (!userId || !attemptId || !answers.length) {
-	// 		throw new Error('Invalid input data')
-	// 	}
-
-	// 	const attempt = await this.prisma.attempt.findUnique({
-	// 		where: { id: attemptId, userId },
-	// 		select: { testId: true }
-	// 	})
-
-	// 	if (!attempt) {
-	// 		throw new Error('Attempt not found or unauthorized')
-	// 	}
-
-	// 	const questions = await this.prisma.question.findMany({
-	// 		where: { id: { in: answers.map(a => a.questionId) } },
-	// 		select: { id: true, type: true, correctAnswers: true, weight: true }
-	// 	})
-
-	// 	const attemptAnswers = answers.map(({ questionId, selectedAnswers }) => {
-	// 		const question = questions.find(q => q.id === questionId)
-	// 		let isCorrect: boolean | null = false
-
-	// 		if (question) {
-	// 			if (question.type === 'MULTIPLE_CHOICE') {
-	// 				// Корректная проверка множества ответов
-	// 				const sortedSelected = selectedAnswers.slice().sort()
-	// 				const sortedCorrect = question.correctAnswers.slice().sort()
-	// 				isCorrect = sortedSelected.length === sortedCorrect.length &&
-	// 					sortedSelected.every((v, i) => v === sortedCorrect[i])
-	// 			} else if (question.type === 'SHORT_ANSWER') {
-	// 				const normalizedSelected = selectedAnswers[0]?.trim().toLowerCase() || ''
-	// 				const normalizedCorrect = question.correctAnswers.map(a => a.trim().toLowerCase())
-	// 				isCorrect = normalizedCorrect.includes(normalizedSelected)
-	// 			} else if (question.type === 'OPEN_QUESTION') {
-	// 				isCorrect = null
-	// 			}
-	// 		}
-
-	// 		return { attemptId, questionId, selectedAnswers, isCorrect }
-	// 	})
-
-	// 	await this.prisma.attemptAnswer.createMany({ data: attemptAnswers })
-
-
-	// 	const totalWeight = questions.reduce((sum, q) => sum + (q.weight || 1), 0)
-	// 	const weightedScore = attemptAnswers
-	// 		.filter(a => a.isCorrect === true)
-	// 		.reduce((sum, a) => {
-	// 			const question = questions.find(q => q.id === a.questionId)
-	// 			return sum + (question?.weight || 1)
-	// 		}, 0)
-	// 	const score = totalWeight > 0 ? Math.round((weightedScore / totalWeight) * 100) : 0
-
-	// 	await this.prisma.$transaction([
-	// 		this.prisma.attempt.update({
-	// 			where: { id: attemptId, userId },
-	// 			data: { status: 'COMPLETED', endTime: new Date() }
-	// 		}),
-	// 		this.prisma.result.create({
-	// 			data: { attemptId, userId, testId: attempt.testId, score }
-	// 		})
-	// 	])
-
-	// 	return { message: 'Test submitted successfully', score }
-	// }
 	async saveProgress(
 		userId: string,
 		attemptId: string,
@@ -291,78 +321,168 @@ export class QuizService {
 		})
 
 		if (!attempt) throw new NotFoundException('Attempt not found')
+		if (attempt.status !== AttemptStatus.IN_PROGRESS) {
+			throw new ForbiddenException('This test attempt is already completed')
+		}
+
+		// Store progress information as JSON
+		const progressData = answers.map(({ questionId, selectedAnswers, userAnswer }) => ({
+			questionId,
+			selectedAnswers: selectedAnswers || [],
+			userAnswer: userAnswer || null,
+		}))
 
 		return this.prisma.attempt.update({
 			where: { id: attemptId },
 			data: {
-				progress: JSON.stringify(answers.map(({ questionId, selectedAnswers, userAnswer }) => ({
-					questionId,
-					selectedAnswers: selectedAnswers || [], // По умолчанию пустой массив
-					userAnswer: userAnswer || null, // По умолчанию null
-				}))),
+				progress: JSON.stringify(progressData),
 			},
 		})
 	}
 
-	async submitTest(
+	async submitPracticeTest(
 		userId: string,
 		attemptId: string,
 		answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
-	) {
+	): Promise<PracticeTestResponse> {
 		if (!userId || !attemptId || !answers.length) {
 			throw new Error('Invalid input data')
 		}
 
 		const attempt = await this.prisma.attempt.findUnique({
 			where: { id: attemptId, userId },
-			select: { testId: true }
 		})
 
 		if (!attempt) {
-			throw new Error('Attempt not found or unauthorized')
+			throw new NotFoundException('Attempt not found or unauthorized')
+		}
+
+		if (attempt.status !== AttemptStatus.IN_PROGRESS) {
+			throw new ForbiddenException('This test attempt is already completed')
 		}
 
 		const questions = await this.prisma.question.findMany({
-			where: { id: { in: answers.map(a => a.questionId) } },
-			select: { id: true, type: true, correctAnswers: true, weight: true }
+			where: { testId: attempt.testId },
+			select: { id: true, type: true, correctAnswers: true, weight: true, title: true, options: true, explanation: true }
 		})
 
+		// Process answers for practice mode - show all answers and explanations
 		const attemptAnswers = answers.map(({ questionId, selectedAnswers, userAnswer }) => {
 			const question = questions.find(q => q.id === questionId)
-			let isCorrect: boolean | null = false
-
-			if (question) {
-				if (question.type === 'MULTIPLE_CHOICE') {
-					const sortedSelected = (selectedAnswers || []).slice().sort()
-					const sortedCorrect = question.correctAnswers.slice().sort()
-					isCorrect =
-						sortedSelected.length === sortedCorrect.length &&
-						sortedSelected.every((v, i) => v === sortedCorrect[i])
-				} else if (question.type === 'SHORT_ANSWER') {
-					const normalizedSelected = userAnswer?.trim().toLowerCase() || ''
-					const normalizedCorrect = question.correctAnswers.map(a => a.trim().toLowerCase())
-					isCorrect = normalizedCorrect.includes(normalizedSelected)
-				} else if (question.type === 'TRUE_FALSE') {
-					isCorrect = selectedAnswers?.[0]?.toLowerCase() === question.correctAnswers[0]?.toLowerCase()
-				} else if (question.type === 'OPEN_QUESTION') {
-					isCorrect = null // Открытые вопросы проверяются вручную, балл не ставим
-				}
-			} else {
-				throw new Error('Something bad')
-			}
+			const isCorrect = this.processAnswer(question, selectedAnswers, userAnswer)
 
 			return {
 				attemptId,
 				questionId,
 				selectedAnswers: selectedAnswers || [],
 				userAnswer: userAnswer || null,
-				isCorrect
+				isCorrect,
+				status: question?.type === 'OPEN_QUESTION' ? AnswerStatus.PENDING : AnswerStatus.CHECKED
 			}
 		})
 
+		// Save answers and update attempt status
 		await this.prisma.attemptAnswer.createMany({ data: attemptAnswers })
 
-		// 📊 Подсчет баллов
+		// Calculate score
+		const totalQuestions = questions.length
+		const correctAnswers = attemptAnswers.filter(a => a.isCorrect === true).length
+		const score = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0
+
+		await this.prisma.$transaction([
+			this.prisma.attempt.update({
+				where: { id: attemptId, userId },
+				data: { status: AttemptStatus.COMPLETED, endTime: new Date() }
+			}),
+			this.prisma.result.create({
+				data: { attemptId, userId, testId: attempt.testId, score }
+			})
+		])
+
+		// Return detailed results for practice mode
+		const detailedResults: DetailedTestResult[] = questions.map(question => {
+			const userAnswer = attemptAnswers.find(a => a.questionId === question.id)
+			return {
+				questionId: question.id,
+				questionTitle: question.title,
+				questionType: question.type,
+				options: question.options,
+				correctAnswers: question.correctAnswers,
+				userSelectedAnswers: userAnswer?.selectedAnswers || [],
+				userAnswer: userAnswer?.userAnswer || null,
+				isCorrect: userAnswer?.isCorrect || null,
+				explanation: question.explanation
+			}
+		})
+
+		return {
+			message: 'Practice test completed successfully',
+			score,
+			totalQuestions,
+			correctAnswers,
+			incorrectAnswers: totalQuestions - correctAnswers,
+			detailedResults,
+			showAnswers: true
+		}
+	}
+
+	async submitExamTest(
+		userId: string,
+		attemptId: string,
+		answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
+	): Promise<ExamTestResponse> {
+		if (!userId || !attemptId || !answers.length) {
+			throw new Error('Invalid input data')
+		}
+
+		const attempt = await this.prisma.attempt.findUnique({
+			where: { id: attemptId, userId },
+			include: {
+				test: { select: { timeLimit: true, showAnswers: true } }
+			}
+		})
+
+		if (!attempt) {
+			throw new NotFoundException('Attempt not found or unauthorized')
+		}
+
+		if (attempt.status !== AttemptStatus.IN_PROGRESS) {
+			throw new ForbiddenException('This test attempt is already completed')
+		}
+
+		// Check if the test was submitted within time limits
+		const now = new Date()
+		const startTime = new Date(attempt.startTime)
+		const questions = await this.prisma.question.findMany({
+			where: { testId: attempt.testId },
+			select: { id: true, type: true, correctAnswers: true, weight: true, title: true, options: true, explanation: true }
+		})
+
+		const totalTimeLimit = attempt.test.timeLimit
+		const elapsedMinutes = (now.getTime() - startTime.getTime()) / (60 * 1000)
+
+		// Set timeout status if over time limit
+		const attemptStatus = elapsedMinutes > totalTimeLimit ? AttemptStatus.TIMEOUT : AttemptStatus.COMPLETED
+
+		// Process answers
+		const attemptAnswers = answers.map(({ questionId, selectedAnswers, userAnswer }) => {
+			const question = questions.find(q => q.id === questionId)
+			const isCorrect = this.processAnswer(question, selectedAnswers, userAnswer)
+
+			return {
+				attemptId,
+				questionId,
+				selectedAnswers: selectedAnswers || [],
+				userAnswer: userAnswer || null,
+				isCorrect,
+				status: question?.type === 'OPEN_QUESTION' ? AnswerStatus.PENDING : AnswerStatus.CHECKED
+			}
+		})
+
+		// Save answers and update attempt status
+		await this.prisma.attemptAnswer.createMany({ data: attemptAnswers })
+
+		// Calculate weighted score for exam mode
 		const totalWeight = questions.reduce((sum, q) => sum + (q.weight || 1), 0)
 		const weightedScore = attemptAnswers
 			.filter(a => a.isCorrect === true)
@@ -372,36 +492,46 @@ export class QuizService {
 			}, 0)
 		const score = totalWeight > 0 ? Math.round((weightedScore / totalWeight) * 100) : 0
 
+		// Apply penalty for timeout if needed
+		const finalScore = attemptStatus === AttemptStatus.TIMEOUT ? Math.max(0, score - 10) : score
+
 		await this.prisma.$transaction([
 			this.prisma.attempt.update({
 				where: { id: attemptId, userId },
-				data: { status: 'COMPLETED', endTime: new Date() }
+				data: { status: attemptStatus, endTime: now }
 			}),
 			this.prisma.result.create({
-				data: { attemptId, userId, testId: attempt.testId, score }
+				data: { attemptId, userId, testId: attempt.testId, score: finalScore }
 			})
 		])
 
-		return { message: 'Test submitted successfully', score }
-	}
+		// Return limited results for exam mode (based on showAnswers setting)
+		const detailedResults: DetailedTestResult[] | null = attempt.test.showAnswers
+			? questions.map(question => {
+				const userAnswer = attemptAnswers.find(a => a.questionId === question.id)
+				return {
+					questionId: question.id,
+					questionTitle: question.title,
+					questionType: question.type,
+					options: question.options,
+					correctAnswers: question.correctAnswers,
+					userSelectedAnswers: userAnswer?.selectedAnswers || [],
+					userAnswer: userAnswer?.userAnswer || null,
+					isCorrect: userAnswer?.isCorrect || null,
+					explanation: question.explanation
+				}
+			})
+			: null
 
-	async autoSaveTest(userId: string, testId: string, dto: UpdateTestDto) {
-		const test = await this.prisma.test.findUnique({
-			where: { id: testId },
-		})
-
-		if (!test) throw new NotFoundException('Test not found')
-		if (test.creatorId !== userId) throw new ForbiddenException('Not allowed to edit this test')
-
-		return this.prisma.test.update({
-			where: { id: testId },
-			data: {
-				title: dto.title ?? test.title,
-				isDraft: true,
-				maxAttempts: dto.maxAttempts ?? test.maxAttempts,
-				showAnswers: dto.showAnswers ?? test.showAnswers,
-			},
-		})
+		return {
+			message: 'Exam submitted successfully',
+			score: finalScore,
+			status: attemptStatus,
+			timeElapsed: Math.round(elapsedMinutes),
+			timeLimit: totalTimeLimit,
+			showAnswers: attempt.test.showAnswers,
+			detailedResults
+		}
 	}
 
 	async getPendingAnswers(teacherId: string) {
@@ -437,17 +567,10 @@ export class QuizService {
 
 		if (!attempt) throw new NotFoundException('Попытка не найдена')
 
-		const answers = await this.prisma.attemptAnswer.findMany({
-			where: { attemptId },
-			select: { isCorrect: true, question: { select: { weight: true } } },
-		})
+		// Use the helper method to calculate the score
+		const newScore = await this.calculateScore(attemptId)
 
-		const totalWeight = answers.reduce((sum, a) => sum + (a.question.weight || 1), 0)
-		const correctWeight = answers.filter(a => a.isCorrect).reduce((sum, a) => sum + (a.question.weight || 1), 0)
-
-		const newScore = totalWeight > 0 ? Math.round((correctWeight / totalWeight) * 100) : 0
-
-		// Находим уникальный ID результата
+		// Find the result record
 		const result = await this.prisma.result.findFirst({
 			where: { attemptId },
 			select: { id: true },
@@ -456,7 +579,7 @@ export class QuizService {
 		if (!result) throw new NotFoundException('Результат не найден')
 
 		return this.prisma.result.update({
-			where: { id: result.id }, // ✅ Используем ID
+			where: { id: result.id },
 			data: { score: newScore },
 		})
 	}
@@ -480,15 +603,24 @@ export class QuizService {
 			where: { id: answerId },
 			data: {
 				isCorrect,
-				status: AnswerStatus.CHECKED, // ✅ Или AnswerStatus.CORRECT/INCORRECT, если добавил в schema.prisma
+				status: AnswerStatus.CHECKED,
 			},
 		})
 
 		return this.recalculateAttemptScore(answer.attemptId)
 	}
 
-	async getTestResults(attemptId: string) {
-		return this.prisma.attemptAnswer.findMany({
+	async getPracticeTestResults(attemptId: string): Promise<PracticeTestResultsResponse> {
+		const attempt = await this.prisma.attempt.findUnique({
+			where: { id: attemptId },
+			include: { test: { select: { title: true } } }
+		})
+
+		if (!attempt) {
+			throw new NotFoundException('Attempt not found')
+		}
+
+		const results = await this.prisma.attemptAnswer.findMany({
 			where: { attemptId },
 			select: {
 				questionId: true,
@@ -496,14 +628,108 @@ export class QuizService {
 				userAnswer: true,
 				isCorrect: true,
 				question: {
-					select: { correctAnswers: true, type: true },
+					select: {
+						correctAnswers: true,
+						type: true,
+						title: true,
+						options: true,
+						explanation: true,
+						weight: true
+					},
 				},
 			},
-		}).then(results => results.map(r => ({
-			...r,
-			isCorrect: r.question.type === 'OPEN_QUESTION' ? null : r.isCorrect,
-			userAnswer: r.question.type === 'SHORT_ANSWER' || r.question.type === 'OPEN_QUESTION' ? r.userAnswer : null
-		})))
+		})
+
+		const totalQuestions = results.length
+		const correctAnswers = results.filter(r => r.isCorrect === true).length
+		const score = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0
+
+		const mappedResults: DetailedTestResult[] = results.map(r => ({
+			questionId: r.questionId,
+			questionTitle: r.question.title,
+			questionType: r.question.type,
+			options: r.question.options,
+			correctAnswers: r.question.correctAnswers,
+			userSelectedAnswers: r.selectedAnswers,
+			userAnswer: r.question.type === 'SHORT_ANSWER' || r.question.type === 'OPEN_QUESTION' ? r.userAnswer : null,
+			isCorrect: r.isCorrect,
+			explanation: r.question.explanation
+		}))
+
+		return {
+			testTitle: attempt.test.title,
+			score,
+			totalQuestions,
+			correctAnswers,
+			incorrectAnswers: totalQuestions - correctAnswers,
+			showAnswers: true,
+			mode: 'PRACTICE',
+			results: mappedResults
+		}
+	}
+
+	async getExamTestResults(attemptId: string): Promise<ExamTestResultsResponse> {
+		const attempt = await this.prisma.attempt.findUnique({
+			where: { id: attemptId },
+			include: {
+				test: { select: { title: true, showAnswers: true } },
+				results: { select: { score: true } }
+			}
+		})
+
+		if (!attempt) {
+			throw new NotFoundException('Attempt not found')
+		}
+
+		const baseResult: ExamTestResultsResponse = {
+			testTitle: attempt.test.title,
+			score: attempt.results[0]?.score || 0,
+			status: attempt.status,
+			showAnswers: attempt.test.showAnswers,
+			mode: 'EXAM'
+		}
+
+		// Only return detailed results if showAnswers is enabled
+		if (attempt.test.showAnswers) {
+			const results = await this.prisma.attemptAnswer.findMany({
+				where: { attemptId },
+				select: {
+					questionId: true,
+					selectedAnswers: true,
+					userAnswer: true,
+					isCorrect: true,
+					question: {
+						select: {
+							correctAnswers: true,
+							type: true,
+							title: true,
+							options: true,
+							explanation: true,
+							weight: true
+						},
+					},
+				},
+			})
+
+			const mappedResults: DetailedTestResult[] = results.map(r => ({
+				questionId: r.questionId,
+				questionTitle: r.question.title,
+				questionType: r.question.type,
+				options: r.question.options,
+				correctAnswers: r.question.correctAnswers,
+				userSelectedAnswers: r.selectedAnswers,
+				userAnswer: r.question.type === 'SHORT_ANSWER' || r.question.type === 'OPEN_QUESTION' ? r.userAnswer : null,
+				isCorrect: r.question.type === 'OPEN_QUESTION' ? null : r.isCorrect,
+				explanation: r.question.explanation
+			}))
+
+			return {
+				...baseResult,
+				results: mappedResults
+			}
+		}
+
+		return baseResult
 	}
 
 	async exportCompletedTestToPDF(attemptId: string, res: Response) {
@@ -638,7 +864,6 @@ export class QuizService {
 		doc.end()
 	}
 
-	// 📄 Экспорт теста (без ответов)
 	async exportTestToPDF(testId: string, res: Response) {
 		const test = await this.prisma.test.findUnique({
 			where: { id: testId },
@@ -735,8 +960,9 @@ export class QuizService {
 						.fillColor('green')
 						.text('Правильные ответы:')
 					question.correctAnswers.forEach((correctAnswer, id) => {
-							doc.text(`${String.fromCharCode(65 + id)}) ${correctAnswer}`
-						)})
+						doc.text(`${String.fromCharCode(65 + id)}) ${correctAnswer}`
+						)
+					})
 					break
 
 				case 'SHORT_ANSWER':
@@ -790,24 +1016,6 @@ export class QuizService {
 
 			doc.moveDown(2)
 		})
-
-		// // Итоговая информация
-		// doc.fontSize(12)
-		// 	.fillColor('black')
-		// 	.text('Информация о тесте:', { underline: true })
-		// 	.moveDown(0.5)
-
-		// const totalWeight = test.questions.reduce((sum, q) => sum + (q.weight || 1), 0)
-		// const multipleChoice = test.questions.filter(q => q.type === 'MULTIPLE_CHOICE').length
-		// const shortAnswer = test.questions.filter(q => q.type === 'SHORT_ANSWER').length
-		// const openQuestion = test.questions.filter(q => q.type === 'OPEN_QUESTION').length
-
-		// doc.fontSize(10)
-		// 	.text(`Общий вес теста: ${totalWeight} баллов`)
-		// 	.text(`Вопросов с множественным выбором: ${multipleChoice}`)
-		// 	.text(`Вопросов с коротким ответом: ${shortAnswer}`)
-		// 	.text(`Открытых вопросов: ${openQuestion}`)
-
 		doc.end()
 	}
 }

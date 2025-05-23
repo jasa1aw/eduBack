@@ -45,8 +45,10 @@ model Test {
   questions   Question[]
   results     Result[]
   attempts    Attempt[]
+  timeLimit   Int        @default(10)
   maxAttempts Int?       @default(1)
   showAnswers Boolean    @default(false)
+  examMode    Boolean    @default(false) // ✅ Добавляем поле для режима экзамена
   createdAt   DateTime   @default(now())
 }
 
@@ -62,7 +64,6 @@ model Question {
   explanation    String?
   image          String?
   weight         Int?            @default(1)
-  timeLimit      Int             @default(10)
   attemptAnswers AttemptAnswer[]
 }
 
@@ -80,6 +81,11 @@ enum AttemptStatus {
   TIMEOUT
 }
 
+enum AttemptMode {
+  PRACTICE
+  EXAM
+}
+
 // 🏁 Attempt — попытка прохождения теста
 model Attempt {
   id        String          @id @default(uuid())
@@ -90,6 +96,7 @@ model Attempt {
   startTime DateTime        @default(now())
   endTime   DateTime?
   status    AttemptStatus   @default(IN_PROGRESS)
+  mode      AttemptMode     @default(PRACTICE)
   answers   AttemptAnswer[]
   results   Result[]
   progress  Json            @default("{}")
