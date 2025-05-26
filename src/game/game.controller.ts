@@ -124,6 +124,18 @@ export class GameController {
 	}
 
 	/**
+	 * 💬 Получение полной информации о чате команды (новый улучшенный эндпоинт)
+	 */
+	@Get('competitions/:competitionId/teams/:teamId/chat-full')
+	async getTeamChatFull(
+		@Param('competitionId') competitionId: string,
+		@Param('teamId') teamId: string,
+		@Query('participantId') participantId: string
+	) {
+		return this.gameService.getTeamChatFull(competitionId, teamId, participantId)
+	}
+
+	/**
 	 * 🔍 Поиск соревнования по коду
 	 */
 	@Get('competitions/code/:code')
@@ -176,5 +188,31 @@ export class GameController {
 		@Query('participantId') participantId: string
 	) {
 		return this.gameService.getTeamProgress(participantId)
+	}
+
+	/**
+	 * 👥 Dashboard для создателя с real-time данными участников
+	 */
+	@Get('competitions/:competitionId/creator-dashboard')
+	@UseGuards(JwtAuthGuard)
+	async getCreatorDashboard(
+		@Param('competitionId') competitionId: string,
+		@Request() req
+	) {
+		const creatorId = req.user.id
+		return this.gameService.getCreatorDashboard(competitionId, creatorId)
+	}
+
+	/**
+	 * 📊 Статистика участников для создателя
+	 */
+	@Get('competitions/:competitionId/participants-stats')
+	@UseGuards(JwtAuthGuard)
+	async getParticipantsStats(
+		@Param('competitionId') competitionId: string,
+		@Request() req
+	) {
+		const creatorId = req.user.id
+		return this.gameService.getParticipantsStats(competitionId, creatorId)
 	}
 } 

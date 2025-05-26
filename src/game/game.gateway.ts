@@ -210,7 +210,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * 💬 Отправка сообщения в чат команды
+   * 💬 Отправка сообщения в чат команды (улучшенная версия)
    */
   @SubscribeMessage('teamChat')
   async handleTeamChat(
@@ -220,31 +220,64 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { competitionId, teamId, message, participantId } = payload
 
-      // Отправляем сообщение
-      await this.gameService.sendTeamMessage(
+      // Отправляем сообщение и получаем форматированный ответ
+      const chatMessage = await this.gameService.sendTeamMessage(
         competitionId,
         teamId,
         participantId,
         message
       )
 
-      // Получаем данные участника
-      const competition = await this.gameService.getCompetition(competitionId)
-      const participant = competition.participants.find(p => p.id === participantId)
-
       // Отправляем сообщение всем участникам команды
-      this.server.to(`team:${teamId}`).emit('teamMessage', {
-        id: Date.now().toString(),
-        participantName: participant?.displayName || 'Unknown',
-        message,
-        timestamp: new Date().toISOString(),
-        isOwn: false
-      })
+      this.server.to(`team:${teamId}`).emit('teamMessage', chatMessage)
+
+      // Подтверждаем отправителю
+      client.emit('messageSent', { success: true, messageId: chatMessage.id })
 
       console.log(`💬 Message sent to team ${teamId} by ${participantId}`)
     } catch (error) {
       console.error('Error sending team message:', error)
       client.emit('error', { message: 'Failed to send message' })
+    }
+  }
+
+  /**
+   * 💬 Получение полного чата команды
+   */
+  @SubscribeMessage('getTeamChatFull')
+  async handleGetTeamChatFull(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: { competitionId: string; teamId: string; participantId: string }
+  ) {
+    try {
+      const { competitionId, teamId, participantId } = payload
+
+      const chatData = await this.gameService.getTeamChatFull(competitionId, teamId, participantId)
+
+      client.emit('teamChatFull', chatData)
+    } catch (error) {
+      console.error('Error getting team chat:', error)
+      client.emit('error', { message: 'Failed to get team chat' })
+    }
+  }
+
+  /**
+   * 👥 Получение dashboard для создателя
+   */
+  @SubscribeMessage('getCreatorDashboard')
+  async handleGetCreatorDashboard(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: { competitionId: string; creatorId: string }
+  ) {
+    try {
+      const { competitionId, creatorId } = payload
+
+      const dashboard = await this.gameService.getCreatorDashboard(competitionId, creatorId)
+
+      client.emit('creatorDashboard', dashboard)
+    } catch (error) {
+      console.error('Error getting creator dashboard:', error)
+      client.emit('error', { message: 'Failed to get creator dashboard' })
     }
   }
 
@@ -355,11 +388,34 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const competition = await this.gameService.getCompetition(competitionId)
 
+      // Отправляем обновление всем участникам
       this.server.to(`competition:${competitionId}`).emit('competitionUpdated', {
         competition
       })
+
+      // Отправляем обновленный dashboard создателю
+      await this.broadcastCreatorDashboardUpdate(competitionId)
     } catch (error) {
       console.error('Error broadcasting competition update:', error)
+    }
+  }
+
+  /**
+   * Отправка обновленного dashboard создателю
+   */
+  async broadcastCreatorDashboardUpdate(competitionId: string) {
+    try {
+      // Получаем информацию о соревновании для определения создателя
+      const competition = await this.gameService.getCompetition(competitionId)
+
+      if (competition.isCreator) {
+        const dashboard = await this.gameService.getCreatorDashboard(competitionId, competition.creatorName) // Нужно будет передать creatorId
+
+        // Отправляем обновление создателю в отдельную комнату
+        this.server.to(`creator:${competitionId}`).emit('creatorDashboardUpdated', dashboard)
+      }
+    } catch (error) {
+      console.error('Error broadcasting creator dashboard update:', error)
     }
   }
 

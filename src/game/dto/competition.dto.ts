@@ -195,4 +195,71 @@ export interface TeamProgress {
 	isCompleted: boolean
 	canAnswer: boolean
 	isObserver: boolean
+}
+
+// 💬 Новые интерфейсы для чата команды
+export interface TeamChatMessage {
+	id: string
+	participantId: string
+	participantName: string
+	message: string
+	timestamp: string
+	isOwn: boolean
+}
+
+export interface TeamChatResponse {
+	teamId: string
+	teamName: string
+	teamColor: string
+	messages: TeamChatMessage[]
+	canSendMessages: boolean
+}
+
+// 👥 Интерфейсы для real-time отображения участников (для создателя)
+export interface CreatorDashboardParticipant {
+	id: string
+	displayName: string
+	isGuest: boolean
+	isOnline: boolean
+	joinedAt: string
+	teamInfo?: {
+		id: string
+		name: string
+		color: string
+		isSelected: boolean // выбран ли как игрок команды
+	}
+	status: 'waiting' | 'in_team' | 'selected_player' | 'disconnected'
+}
+
+export interface CreatorDashboardTeam {
+	id: string
+	name: string
+	color: string
+	participantCount: number
+	participants: CreatorDashboardParticipant[]
+	selectedPlayer?: CreatorDashboardParticipant
+	hasSelectedPlayer: boolean
+	isReady: boolean // готова ли команда к началу
+}
+
+export interface CreatorDashboardResponse {
+	competition: {
+		id: string
+		code: string
+		title: string
+		status: CompetitionStatus
+		testTitle: string
+		maxTeams: number
+		canStart: boolean
+		totalParticipants: number
+		onlineParticipants: number
+	}
+	teams: CreatorDashboardTeam[]
+	unassignedParticipants: CreatorDashboardParticipant[]
+	recentActivity: {
+		type: 'participant_joined' | 'participant_left' | 'team_selected' | 'player_selected'
+		participantName: string
+		teamName?: string
+		timestamp: string
+	}[]
 } 

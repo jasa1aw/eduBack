@@ -4,9 +4,14 @@ import { CompetitionStatus } from '@prisma/client'
 import {
 	CompetitionResponse,
 	CreateCompetitionDto,
+	CreatorDashboardParticipant,
+	CreatorDashboardResponse,
+	CreatorDashboardTeam,
 	JoinCompetitionDto,
 	LeaderboardResponse,
 	ParticipantResponse,
+	TeamChatMessage,
+	TeamChatResponse,
 	TeamResponse
 } from './dto/competition.dto'
 
@@ -405,14 +410,14 @@ export class GameService {
 	}
 
 	/**
-	 * 💬 Отправка сообщения в чат команды
+	 * 💬 Отправка сообщения в чат команды (улучшенная версия)
 	 */
 	async sendTeamMessage(
 		competitionId: string,
 		teamId: string,
 		participantId: string,
 		message: string
-	): Promise<void> {
+	): Promise<TeamChatMessage> {
 		// Проверяем принадлежность участника к команде
 		const participant = await this.prisma.competitionParticipant.findFirst({
 			where: {
@@ -426,13 +431,82 @@ export class GameService {
 			throw new ForbiddenException('Participant not in this team')
 		}
 
-		await this.prisma.teamChatMessage.create({
+		// Создаем сообщение
+		const chatMessage = await this.prisma.teamChatMessage.create({
 			data: {
 				teamId,
 				participantId,
 				message
+			},
+			include: {
+				participant: {
+					select: { displayName: true }
+				}
 			}
 		})
+
+		// Возвращаем форматированное сообщение
+		return {
+			id: chatMessage.id,
+			participantId: chatMessage.participantId,
+			participantName: chatMessage.participant.displayName,
+			message: chatMessage.message,
+			timestamp: chatMessage.createdAt.toISOString(),
+			isOwn: false // будет установлено на фронтенде
+		}
+	}
+
+	/**
+	 * 📝 Получение чата команды с полной информацией (улучшенная версия)
+	 */
+	async getTeamChatFull(competitionId: string, teamId: string, participantId: string): Promise<TeamChatResponse> {
+		// Проверяем принадлежность участника к команде
+		const participant = await this.prisma.competitionParticipant.findFirst({
+			where: {
+				id: participantId,
+				competitionId,
+				teamId
+			},
+			include: {
+				team: {
+					select: { name: true, color: true }
+				}
+			}
+		})
+
+		if (!participant) {
+			throw new ForbiddenException('Participant not in this team')
+		}
+
+		// Получаем сообщения
+		const messages = await this.prisma.teamChatMessage.findMany({
+			where: { teamId },
+			include: {
+				participant: {
+					select: { id: true, displayName: true }
+				}
+			},
+			orderBy: { createdAt: 'asc' },
+			take: 100
+		})
+
+		// Форматируем сообщения
+		const formattedMessages: TeamChatMessage[] = messages.map(msg => ({
+			id: msg.id,
+			participantId: msg.participantId,
+			participantName: msg.participant.displayName,
+			message: msg.message,
+			timestamp: msg.createdAt.toISOString(),
+			isOwn: msg.participantId === participantId
+		}))
+
+		return {
+			teamId,
+			teamName: participant.team?.name || 'Unknown Team',
+			teamColor: participant.team?.color || '#000000',
+			messages: formattedMessages,
+			canSendMessages: true
+		}
 	}
 
 	/**
@@ -463,8 +537,8 @@ export class GameService {
 	// =================== QUIZ METHODS ===================
 
 	/**
- * 📝 Получение текущего вопроса для участника
- */
+	 * 📝 Получение текущего вопроса для участника
+	 */
 	async getCurrentQuestion(participantId: string) {
 		// Находим участника
 		const participant = await this.prisma.competitionParticipant.findUnique({
@@ -727,8 +801,8 @@ export class GameService {
 	}
 
 	/**
- * 🔢 Обновление счета команды
- */
+	 * 🔢 Обновление счета команды
+	 */
 	private async updateTeamScore(teamId: string) {
 		const team = await this.prisma.team.findUnique({
 			where: { id: teamId },
@@ -878,6 +952,153 @@ export class GameService {
 			canStart,
 			isCreator: userId === competition.creatorId,
 			userParticipation
+		}
+	}
+
+	/**
+	 * 👥 Dashboard для создателя с real-time данными участников
+	 */
+	async getCreatorDashboard(competitionId: string, creatorId: string): Promise<CreatorDashboardResponse> {
+		// Проверяем права создателя
+		const competition = await this.prisma.competition.findFirst({
+			where: {
+				id: competitionId,
+				creatorId
+			},
+			include: {
+				test: { select: { title: true } },
+				teams: {
+					include: {
+						participants: {
+							include: {
+								user: { select: { name: true } }
+							}
+						}
+					}
+				},
+				participants: {
+					include: {
+						user: { select: { name: true } },
+						team: { select: { id: true, name: true, color: true } }
+					},
+					orderBy: { joinedAt: 'desc' }
+				}
+			}
+		})
+
+		if (!competition) {
+			throw new NotFoundException('Competition not found or access denied')
+		}
+
+		// Форматируем команды для dashboard
+		const dashboardTeams: CreatorDashboardTeam[] = competition.teams.map(team => {
+			const teamParticipants: CreatorDashboardParticipant[] = team.participants.map(participant => ({
+				id: participant.id,
+				displayName: participant.displayName,
+				isGuest: participant.isGuest,
+				isOnline: true, // TODO: реализовать отслеживание онлайн статуса
+				joinedAt: participant.joinedAt.toISOString(),
+				teamInfo: {
+					id: team.id,
+					name: team.name,
+					color: team.color,
+					isSelected: team.selectedPlayerId === participant.id
+				},
+				status: team.selectedPlayerId === participant.id ? 'selected_player' : 'in_team'
+			}))
+
+			const selectedPlayer = teamParticipants.find(p => p.status === 'selected_player')
+
+			return {
+				id: team.id,
+				name: team.name,
+				color: team.color,
+				participantCount: team.participants.length,
+				participants: teamParticipants,
+				selectedPlayer,
+				hasSelectedPlayer: !!selectedPlayer,
+				isReady: !!selectedPlayer && team.participants.length > 0
+			}
+		})
+
+		// Участники без команды
+		const unassignedParticipants: CreatorDashboardParticipant[] = competition.participants
+			.filter(p => !p.teamId)
+			.map(participant => ({
+				id: participant.id,
+				displayName: participant.displayName,
+				isGuest: participant.isGuest,
+				isOnline: true, // TODO: реализовать отслеживание онлайн статуса
+				joinedAt: participant.joinedAt.toISOString(),
+				status: 'waiting'
+			}))
+
+		// Недавняя активность (последние 10 действий)
+		const recentActivity = competition.participants
+			.slice(0, 10)
+			.map(participant => ({
+				type: (participant.teamId ? 'team_selected' : 'participant_joined') as 'team_selected' | 'participant_joined' | 'participant_left' | 'player_selected',
+				participantName: participant.displayName,
+				teamName: participant.team?.name,
+				timestamp: participant.joinedAt.toISOString()
+			}))
+
+		const totalParticipants = competition.participants.length
+		const onlineParticipants = competition.participants.length // TODO: реальный подсчет онлайн
+
+		return {
+			competition: {
+				id: competition.id,
+				code: competition.code,
+				title: competition.title,
+				status: competition.status,
+				testTitle: competition.test.title,
+				maxTeams: competition.maxTeams,
+				canStart: dashboardTeams.every(team => team.isReady) && totalParticipants >= 2,
+				totalParticipants,
+				onlineParticipants
+			},
+			teams: dashboardTeams,
+			unassignedParticipants,
+			recentActivity
+		}
+	}
+
+	/**
+	 * 📊 Получение статистики участников для создателя
+	 */
+	async getParticipantsStats(competitionId: string, creatorId: string) {
+		const competition = await this.prisma.competition.findFirst({
+			where: {
+				id: competitionId,
+				creatorId
+			},
+			include: {
+				participants: {
+					include: {
+						team: { select: { name: true, color: true } }
+					}
+				},
+				teams: {
+					include: {
+						_count: { select: { participants: true } }
+					}
+				}
+			}
+		})
+
+		if (!competition) {
+			throw new NotFoundException('Competition not found')
+		}
+
+		return {
+			totalParticipants: competition.participants.length,
+			participantsInTeams: competition.participants.filter(p => p.teamId).length,
+			participantsWaiting: competition.participants.filter(p => !p.teamId).length,
+			guestCount: competition.participants.filter(p => p.isGuest).length,
+			registeredCount: competition.participants.filter(p => !p.isGuest).length,
+			teamsWithPlayers: competition.teams.filter(t => t._count.participants > 0).length,
+			teamsReady: competition.teams.filter(t => t.selectedPlayerId).length
 		}
 	}
 }
