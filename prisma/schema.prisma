@@ -9,23 +9,25 @@ datasource db {
 
 // 👤 User model
 model User {
-  id                 String              @id @default(uuid())
-  email              String              @unique
-  name               String?
-  role               Role                @default(STUDENT)
-  password           String
-  isVerified         Boolean             @default(false)
-  verifyCode         String?
-  tests              Test[]
-  results            Result[]
-  attempts           Attempt[]
-  createdGames       Game[]              @relation("creator")
-  playingGames       Game[]              @relation("players")
-  invites            Invite[]            @relation("UserInvites") // ✅ Явное указание связи
-  messages           Message[]
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  emailVerifications EmailVerification[]
+  id                        String                   @id @default(uuid())
+  email                     String                   @unique
+  name                      String?
+  role                      Role                     @default(STUDENT)
+  password                  String
+  isVerified                Boolean                  @default(false)
+  verifyCode                String?
+  tests                     Test[]
+  results                   Result[]
+  attempts                  Attempt[]
+  createdGames              Game[]                   @relation("creator")
+  playingGames              Game[]                   @relation("players")
+  createdCompetitions       Competition[]
+  competitionParticipations CompetitionParticipant[]
+  invites                   Invite[]                 @relation("UserInvites")
+  messages                  Message[]
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  emailVerifications        EmailVerification[]
 }
 
 // 🎭 Role enum
@@ -37,19 +39,20 @@ enum Role {
 
 // 📝 Test model
 model Test {
-  id          String     @id @default(uuid())
-  title       String     @default("New test")
-  isDraft     Boolean    @default(true) // ← это важно
-  creator     User       @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  creatorId   String
-  questions   Question[]
-  results     Result[]
-  attempts    Attempt[]
-  timeLimit   Int        @default(10)
-  maxAttempts Int?       @default(1)
-  showAnswers Boolean    @default(false)
-  examMode    Boolean    @default(false) // ✅ Добавляем поле для режима экзамена
-  createdAt   DateTime   @default(now())
+  id           String        @id @default(uuid())
+  title        String        @default("New test")
+  isDraft      Boolean       @default(true)
+  creator      User          @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId    String
+  questions    Question[]
+  results      Result[]
+  attempts     Attempt[]
+  competitions Competition[]
+  timeLimit    Int           @default(10)
+  maxAttempts  Int?          @default(1)
+  showAnswers  Boolean       @default(false)
+  examMode     Boolean       @default(false)
+  createdAt    DateTime      @default(now())
 }
 
 // ❓ Question model
@@ -93,6 +96,7 @@ model Attempt {
   userId    String
   test      Test            @relation(fields: [testId], references: [id], onDelete: Cascade)
   testId    String
+  team      Team?
   startTime DateTime        @default(now())
   endTime   DateTime?
   status    AttemptStatus   @default(IN_PROGRESS)
@@ -103,8 +107,8 @@ model Attempt {
 }
 
 enum AnswerStatus {
-  PENDING // Ожидает проверки
-  CHECKED // Проверен
+  PENDING
+  CHECKED
 }
 
 // 📝 Ответы пользователя в попытке
@@ -114,13 +118,11 @@ model AttemptAnswer {
   attemptId       String
   question        Question     @relation(fields: [questionId], references: [id], onDelete: Cascade)
   questionId      String
-  selectedAnswers String[] // Выбранные ответы
-  userAnswer      String? // Ответ пользователя
+  selectedAnswers String[]
+  userAnswer      String?
   isCorrect       Boolean?
   status          AnswerStatus @default(PENDING)
 }
-
-// 📊 Статусы попытки
 
 // 📈 Result model
 model Result {
@@ -129,9 +131,83 @@ model Result {
   userId    String
   test      Test    @relation(fields: [testId], references: [id], onDelete: Cascade)
   testId    String
-  attempt   Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade) // ✅ Добавляем связь с попыткой
+  attempt   Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   attemptId String
   score     Int
+}
+
+// 🏆 Competition model
+model Competition {
+  id           String                   @id @default(uuid())
+  code         String                   @unique
+  title        String                   @default("Team Competition")
+  test         Test                     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  testId       String
+  creator      User                     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId    String
+  status       CompetitionStatus        @default(WAITING)
+  maxTeams     Int                      @default(2)
+  teams        Team[]
+  participants CompetitionParticipant[]
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime                 @default(now())
+}
+
+enum CompetitionStatus {
+  WAITING
+  STARTING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// 👥 Team model
+model Team {
+  id               String                   @id @default(uuid())
+  name             String
+  color            String
+  competition      Competition              @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  competitionId    String
+  participants     CompetitionParticipant[]
+  selectedPlayer   CompetitionParticipant?  @relation("SelectedPlayer", fields: [selectedPlayerId], references: [id])
+  selectedPlayerId String?                  @unique
+  attempt          Attempt?                 @relation(fields: [attemptId], references: [id])
+  attemptId        String?                  @unique
+  score            Int                      @default(0)
+  position         Int?
+  chatMessages     TeamChatMessage[]
+  createdAt        DateTime                 @default(now())
+}
+
+// 🎮 Competition Participant
+model CompetitionParticipant {
+  id              String            @id @default(uuid())
+  competition     Competition       @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  competitionId   String
+  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId          String?
+  displayName     String
+  isGuest         Boolean           @default(false)
+  team            Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId          String?
+  selectedForTeam Team?             @relation("SelectedPlayer")
+  isReady         Boolean           @default(false)
+  chatMessages    TeamChatMessage[]
+  joinedAt        DateTime          @default(now())
+
+  @@unique([competitionId, userId])
+}
+
+// 💬 Team Chat Messages
+model TeamChatMessage {
+  id            String                 @id @default(uuid())
+  team          Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId        String
+  participant   CompetitionParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  participantId String
+  message       String
+  createdAt     DateTime               @default(now())
 }
 
 // 🎮 Game model
@@ -142,7 +218,7 @@ model Game {
   isPublic  Boolean  @default(false)
   players   User[]   @relation("players")
   chat      Chat?
-  invites   Invite[] @relation("GameInvites") // ✅ Исправлено
+  invites   Invite[] @relation("GameInvites")
   createdAt DateTime @default(now())
 }
 
@@ -175,11 +251,11 @@ enum InviteStatus {
 // 📩 Invite model
 model Invite {
   id     String       @id @default(uuid())
-  game   Game         @relation("GameInvites", fields: [gameId], references: [id], onDelete: Cascade) // ✅ Исправлено
+  game   Game         @relation("GameInvites", fields: [gameId], references: [id], onDelete: Cascade)
   gameId String
   email  String?
   token  String       @unique
-  user   User?        @relation("UserInvites", fields: [userId], references: [id], onDelete: Cascade) // ✅ Исправлено
+  user   User?        @relation("UserInvites", fields: [userId], references: [id], onDelete: Cascade)
   userId String?
   status InviteStatus @default(PENDING)
 }

@@ -1,6 +1,12 @@
 import { JwtAuthGuard } from '@/src/auth/jwtAuth.guard'
 import { AddQuestionDto, CreateTestDto, UpdateQuestionDto, UpdateTestDto } from '@/src/dto/quiz.dto'
-import { ExamTestResponse, ExamTestResultsResponse, PracticeTestResponse, PracticeTestResultsResponse, QuizService } from '@/src/quiz/quiz.service'
+import {
+	ExamTestResponse,
+	ExamTestResultsResponse,
+	PracticeTestResponse,
+	PracticeTestResultsResponse,
+	QuizService
+} from '@/src/quiz/quiz.service'
 import { Roles } from '@/src/quiz/role.decorator'
 import { RoleGuard } from '@/src/quiz/role.guard'
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Request, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common'
@@ -129,8 +135,6 @@ export class QuizController {
 	}
 
 	@Get(':testId/export-with-answers')
-	@UseGuards(RoleGuard)
-	@Roles('TEACHER')
 	async exportTestWithAnswersToPDF(
 		@Param('testId', ParseUUIDPipe) testId: string,
 		@Res() res: Response
@@ -177,9 +181,32 @@ export class QuizController {
 	async saveProgress(
 		@Param('attemptId', ParseUUIDPipe) attemptId: string,
 		@Request() req,
-		@Body() answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
+		@Body() body: { answer: { questionId: string; selectedAnswers?: string[]; userAnswer?: string } }
 	) {
-		return this.quizService.saveProgress(req.user.id, attemptId, answers)
+		return this.quizService.saveProgress(req.user.id, attemptId, body.answer)
+	}
+
+	@Get(':attemptId/questions')
+	async getQuestionsAttempt(@Param('attemptId', ParseUUIDPipe) attemptId: string) {
+		return this.quizService.getQuestionsAttempt(attemptId)
+	}
+	// @Post(':attemptId/answer')
+	// async submitSingleAnswer(
+	// 	@Param('attemptId', ParseUUIDPipe) attemptId: string,
+	// 	@Request() req,
+	// 	@Body() answerData: { questionId: string; selectedAnswers: string[]; userAnswer?: string }
+	// ): Promise<SingleAnswerResponse> {
+	// 	return this.quizService.submitSingleAnswer(req.user.id, attemptId, answerData)
+	// }
+
+	// Session resume (universal for both modes)
+	@Get(':attemptId/resume/:questionId')
+	async resumeAttempt(
+		@Param('attemptId', ParseUUIDPipe) attemptId: string,
+		@Param('questionId', ParseUUIDPipe) questionId: string,
+		@Request() req
+	) {
+		return this.quizService.resumeAttempt(req.user.id, attemptId, questionId)
 	}
 
 	// Practice Mode Endpoints
@@ -194,10 +221,14 @@ export class QuizController {
 	@Post(':attemptId/submit-practice')
 	async submitPracticeTest(
 		@Param('attemptId', ParseUUIDPipe) attemptId: string,
-		@Request() req,
-		@Body() answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
+		@Request() req
 	): Promise<PracticeTestResponse> {
-		return this.quizService.submitPracticeTest(req.user.id, attemptId, answers)
+		return this.quizService.submitPracticeTest(req.user.id, attemptId)
+	}
+
+	@Get(':attemptId/results')
+	async getTestResults(@Param('attemptId', ParseUUIDPipe) attemptId: string) {
+		return this.quizService.getTestResults(attemptId)
 	}
 
 	@Get(':attemptId/practice-results')
@@ -217,14 +248,22 @@ export class QuizController {
 	@Post(':attemptId/submit-exam')
 	async submitExamTest(
 		@Param('attemptId', ParseUUIDPipe) attemptId: string,
-		@Request() req,
-		@Body() answers: { questionId: string; selectedAnswers?: string[]; userAnswer?: string }[]
+		@Request() req
 	): Promise<ExamTestResponse> {
-		return this.quizService.submitExamTest(req.user.id, attemptId, answers)
+		return this.quizService.submitExamTest(req.user.id, attemptId)
 	}
 
 	@Get(':attemptId/exam-results')
 	async getExamTestResults(@Param('attemptId', ParseUUIDPipe) attemptId: string): Promise<ExamTestResultsResponse> {
 		return this.quizService.getExamTestResults(attemptId)
+	}
+
+	@Get(':attemptId/question/:questionId')
+	async getQuestion(
+		@Param('attemptId', ParseUUIDPipe) attemptId: string,
+		@Param('questionId', ParseUUIDPipe) questionId: string,
+		@Request() req
+	) {
+		return this.quizService.getQuestion(req.user.id, attemptId, questionId)
 	}
 }

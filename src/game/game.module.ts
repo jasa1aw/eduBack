@@ -1,13 +1,14 @@
-import { Module } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service'
-import { GameGateway } from './game.gateway';
-import { GameService } from './game.service';
-import { InviteService } from './invite.service'
+import { Module } from '@nestjs/common'
+import { GameController } from './game.controller'
+import { GameGateway } from './game.gateway'
+import { GameService } from './game.service'
 import { InviteController } from './invite.controller'
+import { InviteService } from './invite.service'
 
 @Module({
 	providers: [GameGateway, GameService, PrismaService, InviteService],
-	controllers: [InviteController],
-	exports: [InviteService],
+	controllers: [GameController, InviteController],
+	exports: [GameService, InviteService],
 })
-export class GameModule {}
+export class GameModule { }

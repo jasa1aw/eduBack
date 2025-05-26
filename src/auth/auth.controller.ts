@@ -38,9 +38,10 @@ export class AuthController {
     return { message: `Hello, user !` }
   }
 
-  @Get('me/:userId')
-  getProfile(@Param('userId') userId: string) {
-    return this.authService.getProfile(userId)
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  getProfile(@Req() req) {
+    return this.authService.getProfile(req.user.id)
   }
 
   @Put('profile')
