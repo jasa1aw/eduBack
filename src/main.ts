@@ -7,24 +7,27 @@ import { AppModule } from './app.module'
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)
   app.use(cookieParser())
-  // app.useStaticAssets(path.join(__dirname, '..', 'uploads'), {
-  //   prefix: '/uploads/',
-  // })
   app.useStaticAssets(path.join(process.cwd(), 'uploads'), {
     prefix: '/uploads/',
   })
   // Настройка CORS
   app.enableCors({
-    origin: 'http://localhost:3000',
+    origin: [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:3002',
+      'http://127.0.0.1:3002',
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      'file://',
+      /^http:\/\/localhost:\d+$/,
+      /^http:\/\/127\.0\.0\.1:\d+$/,
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   })
 
-
   await app.listen(3001)
 }
 bootstrap()
-
-// const correctCount = attemptAnswers.filter(a => a.isCorrect === true).length
-// const score = answers.length > 0 ? Math.round((correctCount / answers.length) * 100) : 0

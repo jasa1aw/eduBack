@@ -12,6 +12,7 @@ model User {
   id                        String                   @id @default(uuid())
   email                     String                   @unique
   name                      String?
+  institution               String?
   role                      Role                     @default(STUDENT)
   password                  String
   isVerified                Boolean                  @default(false)
