@@ -16,7 +16,12 @@ interface AuthenticatedSocket extends Socket {
   competitionId?: string
 }
 
-@WebSocketGateway({ cors: { origin: '*' } })
+@WebSocketGateway({
+  cors: {
+    origin: ['http://localhost:3000', 'http://localhost:3002'],
+    credentials: true
+  }
+})
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server

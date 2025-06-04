@@ -28,11 +28,26 @@ export class QuizController {
 		return this.quizService.createTest(req.user.id, dto)
 	}
 
+	// Static routes MUST come before dynamic routes with parameters
 	@Get('my-tests')
 	findAllByUser(@Request() req) {
 		return this.quizService.findAllByUser(req.user.id)
 	}
 
+	@Get('game-tests')
+	findPublishedByUser(@Request() req) {
+		return this.quizService.findPublishedByUser(req.user.id)
+	}
+
+	// Teacher specific endpoints
+	@Get('pending')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER')
+	async getPendingAnswers(@Request() req) {
+		return this.quizService.getPendingAnswers(req.user.id)
+	}
+
+	// Dynamic routes with parameters come after static routes
 	@Get(':id')
 	findOne(@Param('id', ParseUUIDPipe) id: string) {
 		return this.quizService.findOne(id)
@@ -150,32 +165,6 @@ export class QuizController {
 		return this.quizService.exportTestToPDF(testId, res)
 	}
 
-	// Teacher specific endpoints
-	@Get('pending')
-	@UseGuards(RoleGuard)
-	@Roles('TEACHER')
-	async getPendingAnswers(@Request() req) {
-		return this.quizService.getPendingAnswers(req.user.id)
-	}
-
-	@Patch(':answerId/review')
-	@UseGuards(RoleGuard)
-	@Roles('TEACHER')
-	async reviewAnswer(
-		@Request() req,
-		@Param('answerId', ParseUUIDPipe) answerId: string,
-		@Body('isCorrect') isCorrect: boolean
-	) {
-		return this.quizService.reviewAnswer(req.user.id, answerId, isCorrect)
-	}
-
-	@Patch(':attemptId/recalculate-score')
-	@UseGuards(RoleGuard)
-	@Roles('TEACHER')
-	async recalculateAttemptScore(@Param('attemptId', ParseUUIDPipe) attemptId: string) {
-		return this.quizService.recalculateAttemptScore(attemptId)
-	}
-
 	// Progress saving (universal for both modes)
 	@Post(':attemptId/progress')
 	async saveProgress(
@@ -190,14 +179,6 @@ export class QuizController {
 	async getQuestionsAttempt(@Param('attemptId', ParseUUIDPipe) attemptId: string) {
 		return this.quizService.getQuestionsAttempt(attemptId)
 	}
-	// @Post(':attemptId/answer')
-	// async submitSingleAnswer(
-	// 	@Param('attemptId', ParseUUIDPipe) attemptId: string,
-	// 	@Request() req,
-	// 	@Body() answerData: { questionId: string; selectedAnswers: string[]; userAnswer?: string }
-	// ): Promise<SingleAnswerResponse> {
-	// 	return this.quizService.submitSingleAnswer(req.user.id, attemptId, answerData)
-	// }
 
 	// Session resume (universal for both modes)
 	@Get(':attemptId/resume/:questionId')
@@ -265,5 +246,24 @@ export class QuizController {
 		@Request() req
 	) {
 		return this.quizService.getQuestion(req.user.id, attemptId, questionId)
+	}
+
+	// Additional Teacher specific endpoints
+	@Patch(':answerId/review')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER')
+	async reviewAnswer(
+		@Request() req,
+		@Param('answerId', ParseUUIDPipe) answerId: string,
+		@Body('isCorrect') isCorrect: boolean
+	) {
+		return this.quizService.reviewAnswer(req.user.id, answerId, isCorrect)
+	}
+
+	@Patch(':attemptId/recalculate-score')
+	@UseGuards(RoleGuard)
+	@Roles('TEACHER')
+	async recalculateAttemptScore(@Param('attemptId', ParseUUIDPipe) attemptId: string) {
+		return this.quizService.recalculateAttemptScore(attemptId)
 	}
 }

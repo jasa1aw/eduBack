@@ -204,7 +204,19 @@ export class QuizService {
 		if (!test) throw new NotFoundException('Test not found')
 		return test
 	}
-
+	async findPublishedByUser(userId: string) {
+		if (!userId) throw new ForbiddenException('Unauthorized user')
+	
+		const tests = await this.prisma.test.findMany({
+		  where: {
+			creatorId: userId,
+			isDraft: false,
+		  },
+		  include: { questions: true },
+		})
+	
+		return tests
+	  }
 	async createTest(userId: string, dto: CreateTestDto) {
 		if (!userId) throw new ForbiddenException('Unauthorized user')
 

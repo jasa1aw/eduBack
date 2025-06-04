@@ -282,9 +282,31 @@ export class GameService {
 
 		// Создаем попытки для каждой команды
 		for (const team of teamsWithPlayers) {
+			let userId = team.selectedPlayer!.userId
+
+			// Для гостей создаем временного пользователя
+			if (!userId) {
+				const guestUser = await this.prisma.user.create({
+					data: {
+						email: `guest_${team.selectedPlayer!.id}_${Date.now()}@competition.local`,
+						password: '',
+						name: team.selectedPlayer!.displayName,
+						role: 'STUDENT',
+						isVerified: true // Гости автоматически верифицированы для соревнований
+					}
+				})
+				userId = guestUser.id
+
+				// Обновляем участника соревнования, связав его с временным пользователем
+				await this.prisma.competitionParticipant.update({
+					where: { id: team.selectedPlayer!.id },
+					data: { userId: guestUser.id }
+				})
+			}
+
 			const attempt = await this.prisma.attempt.create({
 				data: {
-					userId: team.selectedPlayer!.userId || team.selectedPlayer!.id,
+					userId: userId!,
 					testId: competition.testId,
 					mode: 'PRACTICE',
 					status: 'IN_PROGRESS'
@@ -587,7 +609,6 @@ export class GameService {
 			title: nextQuestion.title,
 			type: nextQuestion.type,
 			options: nextQuestion.options,
-			correctAnswers: nextQuestion.correctAnswers,
 			weight: nextQuestion.weight || 1
 		}
 	}
@@ -646,10 +667,10 @@ export class GameService {
 		}
 
 		// Проверяем, не отвечен ли уже вопрос
-		const existingAnswer = attempt.answers.find(a => a.questionId === questionId)
-		if (existingAnswer) {
-			throw new BadRequestException('Question already answered')
-		}
+		// const existingAnswer = attempt.answers.find(a => a.questionId === questionId)
+		// if (existingAnswer) {
+		// 	throw new BadRequestException('Question already answered')
+		// }
 
 		let isCorrect = false
 
@@ -694,6 +715,7 @@ export class GameService {
 
 		if (isTestCompleted) {
 			// Завершаем попытку
+			
 			await this.prisma.attempt.update({
 				where: { id: attempt.id },
 				data: {
@@ -701,6 +723,8 @@ export class GameService {
 					endTime: new Date()
 				}
 			})
+
+			
 
 			// Проверяем, завершены ли все команды в соревновании
 			await this.checkCompetitionCompletion(participant.competitionId)
@@ -787,8 +811,9 @@ export class GameService {
 		// Проверяем, все ли команды завершили тест
 		const teamsWithAttempts = competition.teams.filter(t => t.attempt)
 		const completedTeams = teamsWithAttempts.filter(t => t.attempt?.status === 'COMPLETED')
-
+		console.log('All teams complefghnm5ymted the test', completedTeams.length, teamsWithAttempts.length)
 		if (completedTeams.length === teamsWithAttempts.length && teamsWithAttempts.length > 0) {
+			console.log('All teams completed the test')
 			// Все команды завершили - завершаем соревнование
 			await this.prisma.competition.update({
 				where: { id: competitionId },
