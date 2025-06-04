@@ -1,316 +1,324 @@
-import { PrismaService } from '@/prisma/prisma.service'
-import { generateVerifyCode } from '@/src/constanst/index'
-import { ChangeEmailConfirmDto, ChangeEmailDto, LoginDto, RegisterDto, ResetPasswordDto, UpdateProfileDto, VerifyEmailDto } from '@/src/dto/auth.dto'
-import { EmailService } from '@/src/email/email.service'
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common'
-import { JwtService } from '@nestjs/jwt'
-import * as bcrypt from 'bcrypt'
-import { Response } from 'express'
+import { PrismaService } from '@/prisma/prisma.service';
+import { generateVerifyCode } from '@/src/constanst/index';
+import {
+  ChangeEmailConfirmDto,
+  ChangeEmailDto,
+  LoginDto,
+  RegisterDto,
+  ResetPasswordDto,
+  UpdateProfileDto,
+  VerifyEmailDto,
+} from '@/src/dto/auth.dto';
+import { EmailService } from '@/src/email/email.service';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { Response } from 'express';
 
 @Injectable()
 export class AuthService {
-	constructor(
-		private readonly prisma: PrismaService,
-		private readonly jwtService: JwtService,
-		private readonly emailService: EmailService,
-		// private readonly mailerService: MailerService,
-	) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly emailService: EmailService,
+  ) {}
 
-	private async validateRegistrationInput(dto: RegisterDto) {
-		// Проверка на пустые поля
-		if (!dto.email || !dto.password || !dto.name) {
-			throw new BadRequestException('Все поля обязательны для заполнения')
-		}
+  private async validateRegistrationInput(
+    dto: RegisterDto,
+    role?: 'STUDENT' | 'TEACHER',
+  ) {
+    if (!dto.email || !dto.password || !dto.name) {
+      throw new BadRequestException('Все поля обязательны для заполнения');
+    }
+    if (role === 'TEACHER' && !dto.institution) {
+      throw new BadRequestException(
+        'Поле Учебное заведение обязательно для учителей',
+      );
+    }
 
-		// Проверка формата email
-		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-		if (!emailRegex.test(dto.email)) {
-			throw new BadRequestException('Неверный формат email')
-		}
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(dto.email)) {
+      throw new BadRequestException('Неверный формат email');
+    }
+    if (dto.password.length < 6) {
+      throw new BadRequestException(
+        'Пароль должен содержать минимум 6 символов',
+      );
+    }
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existingUser) {
+      throw new BadRequestException(
+        'Пользователь с таким email уже существует',
+      );
+    }
+  }
 
-		// Проверка длины пароля
-		if (dto.password.length < 6) {
-			throw new BadRequestException('Пароль должен содержать минимум 6 символов')
-		}
+  private async validateLoginInput(dto: LoginDto) {
+    if (!dto.email || !dto.password) {
+      throw new BadRequestException('Email и пароль обязательны');
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(dto.email)) {
+      throw new BadRequestException('Неверный формат email');
+    }
+  }
 
-		// Проверка на существующего пользователя
-		const existingUser = await this.prisma.user.findUnique({
-			where: { email: dto.email },
-		})
-		if (existingUser) {
-			throw new BadRequestException('Пользователь с таким email уже существует')
-		}
-	}
+  private async createUserWithVerification(
+    dto: RegisterDto,
+    role: 'STUDENT' | 'TEACHER',
+  ) {
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-	private async validateLoginInput(dto: LoginDto) {
-		// Проверка на пустые поля
-		if (!dto.email || !dto.password) {
-			throw new BadRequestException('Email и пароль обязательны')
-		}
+    const verifyCode = generateVerifyCode();
 
-		// Проверка формата email
-		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-		if (!emailRegex.test(dto.email)) {
-			throw new BadRequestException('Неверный формат email')
-		}
-	}
+    const user = await this.prisma.$transaction(async (prisma) => {
+      const user = await prisma.user.create({
+        data: {
+          email: dto.email,
+          password: hashedPassword,
+          name: dto.name,
+          role: role,
+          institution: dto.institution || null,
+          isVerified: false,
+          verifyCode,
+        },
+      });
+      return user;
+    });
 
-	private async createUserWithVerification(dto: RegisterDto, role: 'STUDENT' | 'TEACHER') {
-		// Хеширование пароля
-		const hashedPassword = await bcrypt.hash(dto.password, 10)
+    this.emailService
+      .sendVerificationEmail(dto.email, verifyCode)
+      .catch((err) => console.error('Ошибка отправки письма:', err));
 
-		// Генерация кода подтверждения
-		const verifyCode = generateVerifyCode()
+    return user;
+  }
 
-		// Создание пользователя в транзакции
-		const user = await this.prisma.$transaction(async (prisma) => {
-			const user = await prisma.user.create({
-				data: {
-					email: dto.email,
-					password: hashedPassword,
-					name: dto.name,
-					role: role,
-					isVerified: false,
-					verifyCode,
-				},
-			})
-			return user
-		})
+  async register(dto: RegisterDto) {
+    await this.validateRegistrationInput(dto, 'STUDENT');
 
-		// Отправка письма с подтверждением (асинхронно, без ожидания)
-		this.emailService.sendVerificationEmail(dto.email, verifyCode)
-			.catch(err => console.error('Ошибка отправки письма:', err))
+    await this.createUserWithVerification(dto, 'STUDENT');
 
-		return user
-	}
+    return { message: 'Код подтверждения отправлен на email' };
+  }
 
-	async register(dto: RegisterDto) {
-		// Проверка входных данных
-		await this.validateRegistrationInput(dto)
+  async registerForTeacher(dto: RegisterDto) {
+    await this.validateRegistrationInput(dto, 'TEACHER');
 
-		// Создание пользователя
-		await this.createUserWithVerification(dto, 'STUDENT')
+    await this.createUserWithVerification(dto, 'TEACHER');
 
-		return { message: 'Код подтверждения отправлен на email' }
-	}
+    return { message: 'Код подтверждения отправлен на email' };
+  }
 
-	async registerForTeacher(dto: RegisterDto) {
-		// Проверка входных данных
-		await this.validateRegistrationInput(dto)
+  async login(dto: LoginDto, res: Response) {
+    await this.validateLoginInput(dto);
 
-		// Создание пользователя-учителя
-		await this.createUserWithVerification(dto, 'TEACHER')
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (!user) {
+      throw new UnauthorizedException('Неверный email или пароль');
+    }
 
-		return { message: 'Код подтверждения отправлен на email' }
-	}
+    const passValid = await bcrypt.compare(dto.password, user.password);
+    if (!passValid) {
+      throw new UnauthorizedException('Неверный email или пароль');
+    }
 
-	async login(dto: LoginDto, res: Response) {
-		// Проверка входных данных
-		await this.validateLoginInput(dto)
+    if (!user.isVerified) {
+      throw new UnauthorizedException('Email не подтвержден. Проверьте почту.');
+    }
 
-		// Поиск пользователя
-		const user = await this.prisma.user.findUnique({ where: { email: dto.email } })
-		if (!user) {
-			throw new UnauthorizedException('Неверный email или пароль')
-		}
+    const token = this.jwtService.sign(
+      { id: user.id, role: user.role },
+      { expiresIn: '30d' },
+    );
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
 
-		// Проверка пароля
-		const passValid = await bcrypt.compare(dto.password, user.password)
-		if (!passValid) {
-			throw new UnauthorizedException('Неверный email или пароль')
-		}
+    return res.json({
+      message: 'Вход выполнен успешно',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        institution: user.institution,
+      },
+      token: token,
+    });
+  }
 
-		// Проверка подтверждения email
-		if (!user.isVerified) {
-			throw new UnauthorizedException('Email не подтвержден. Проверьте почту.')
-		}
+  async logout(res: Response) {
+    res.clearCookie('token');
+    return res.json({
+      message: 'Logged out',
+    });
+  }
 
-		// Генерация токена
-		const token = this.jwtService.sign(
-			{ id: user.id, role: user.role },
-			{ expiresIn: '30d' }
-		)
-		res.cookie('token', token, {
-			httpOnly: true,
-			secure: false,
-			sameSite: 'lax',
-			maxAge: 30 * 24 * 60 * 60 * 1000
-		})
+  async verifyEmail(dto: VerifyEmailDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (!user || user.verifyCode !== dto.code) {
+      throw new BadRequestException('Неверный код подтверждения');
+    }
 
-		return res.json({
-			message: 'Вход выполнен успешно',
-			user: {
-				id: user.id,
-				name: user.name,
-				email: user.email,
-				role: user.role,
-			},
-			token: token
-		})
-	}
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isVerified: true,
+        verifyCode: null,
+      },
+    });
 
-	async logout(res: Response) {
-		res.clearCookie('token')
-		return res.json({
-			message: 'Logged out'
-		})
-	}
+    return { message: 'Email успешно подтвержден' };
+  }
 
-	async verifyEmail(dto: VerifyEmailDto) {
-		const user = await this.prisma.user.findUnique({ where: { email: dto.email } })
-		if (!user || user.verifyCode !== dto.code) {
-			throw new BadRequestException('Неверный код подтверждения')
-		}
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        institution: true,
+      },
+    });
+    return user;
+  }
 
-		// Обновление статуса подтверждения email
-		await this.prisma.user.update({
-			where: { id: user.id },
-			data: {
-				isVerified: true,
-				verifyCode: null,
-			},
-		})
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const { name, institution } = dto;
+    const updateData: any = {};
 
-		return { message: 'Email успешно подтвержден' }
-	}
+    if (name !== undefined) updateData.name = name;
+    if (institution !== undefined) updateData.institution = institution;
 
-	async getProfile(userId: string) {
-		const user = await this.prisma.user.findUniqueOrThrow({
-			where: { id: userId },
-			select: { id: true, name: true, email: true, role: true },
-		})
-		return user
-	}
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: { name: true, email: true, institution: true, role: true },
+    });
+  }
 
-	// 📌 Обновление профиля (name, role)
-	async updateProfile(userId: string, dto: UpdateProfileDto) {
-		const { name } = dto
-		return this.prisma.user.update({
-			where: { id: userId },
-			data: { name },
-			select: { name: true, email: true },
-		})
-	}
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (!user) throw new BadRequestException('User not found');
 
-	// 📌 Запрос на сброс пароля
-	async forgotPassword(email: string) {
-		const user = await this.prisma.user.findUnique({
-			where: { email },
-			select: { id: true },
-		})
-		if (!user) throw new BadRequestException('User not found')
+    const token = this.jwtService.sign(
+      { id: user.id, type: 'password_reset' },
+      { expiresIn: '1h' },
+    );
 
-		const token = this.jwtService.sign(
-			{ id: user.id, type: 'password_reset' },
-			{ expiresIn: '1h' }
-		)
+    await this.emailService.sendPasswordReset(email, token);
+    return { message: 'Password reset link sent ' };
+  }
 
-		await this.emailService.sendPasswordReset(email, token)
-		return { message: 'Password reset link sent ' }
-	}
+  async resetPassword(dto: ResetPasswordDto) {
+    const { email, token, newPassword } = dto;
 
-	// 📌 Сброс пароля
-	async resetPassword(dto: ResetPasswordDto) {
-		const { email, token, newPassword } = dto
+    try {
+      const payload = this.jwtService.verify(token);
+      if (payload.type !== 'password_reset') {
+        throw new BadRequestException('Invalid token type');
+      }
 
-		try {
-			const payload = this.jwtService.verify(token)
-			if (payload.type !== 'password_reset') {
-				throw new BadRequestException('Invalid token type')
-			}
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await this.prisma.user.update({
+        where: { id: payload.id, email },
+        data: { password: hashedPassword },
+      });
 
-			const hashedPassword = await bcrypt.hash(newPassword, 10)
-			await this.prisma.user.update({
-				where: { id: payload.id, email },
-				data: { password: hashedPassword },
-			})
+      return { message: 'Password updated successfully' };
+    } catch (error) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+  }
 
-			return { message: 'Password updated successfully' }
-		} catch (error) {
-			throw new BadRequestException('Invalid or expired token')
-		}
-	}
+  async changeEmail(userId: string, dto: ChangeEmailDto) {
+    const { newEmail } = dto;
 
-	// 📌 Запрос на смену email
-	async changeEmail(userId: string, dto: ChangeEmailDto) {
-		const { newEmail } = dto
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!currentUser) throw new BadRequestException('User not found');
 
-		// Проверяем существование текущего пользователя
-		const currentUser = await this.prisma.user.findUnique({ where: { id: userId } })
-		if (!currentUser) throw new BadRequestException('User not found')
+    if (currentUser.email === newEmail) {
+      throw new BadRequestException(
+        'New email must be different from current email',
+      );
+    }
 
-		// Проверяем, не пытается ли пользователь изменить email на тот же самый
-		if (currentUser.email === newEmail) {
-			throw new BadRequestException('New email must be different from current email')
-		}
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: newEmail },
+    });
+    if (existingUser) throw new BadRequestException('Email already in use');
 
-		// Проверяем, не занят ли новый email
-		const existingUser = await this.prisma.user.findUnique({ where: { email: newEmail } })
-		if (existingUser) throw new BadRequestException('Email already in use')
+    const token = this.jwtService.sign(
+      {
+        id: userId,
+        currentEmail: currentUser.email,
+        newEmail,
+        type: 'email_change',
+        iat: Math.floor(Date.now() / 1000),
+      },
+      { expiresIn: '1h' },
+    );
+    await this.emailService.sendEmailChangeVerification(newEmail, token);
+    return { message: 'Verification link sent to new email' };
+  }
 
-		// Генерируем токен с дополнительной информацией
-		const token = this.jwtService.sign(
-			{
-				id: userId,
-				currentEmail: currentUser.email,
-				newEmail,
-				type: 'email_change',
-				iat: Math.floor(Date.now() / 1000)
-			},
-			{ expiresIn: '1h' }
-		)
+  async changeEmailConfirm(dto: ChangeEmailConfirmDto) {
+    const { token } = dto;
 
-		// Отправляем письмо с подтверждением
-		await this.emailService.sendEmailChangeVerification(newEmail, token)
-		return { message: 'Verification link sent to new email' }
-	}
+    try {
+      const payload = this.jwtService.verify(token);
+      if (payload.type !== 'email_change') {
+        throw new BadRequestException('Invalid token type');
+      }
+      const newEmail = payload.newEmail;
+      const now = Math.floor(Date.now() / 1000);
+      if (now - payload.iat > 3600) {
+        throw new BadRequestException('Token has expired');
+      }
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.id },
+      });
+      if (!user) throw new BadRequestException('User not found');
+      if (user.email !== payload.currentEmail) {
+        throw new BadRequestException('Email verification failed');
+      }
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email: newEmail },
+      });
+      if (existingUser) throw new BadRequestException('Email already in use');
+      await this.prisma.$transaction(async (prisma) => {
+        await prisma.user.update({
+          where: { id: payload.id },
+          data: { email: newEmail },
+        });
+      });
 
-	// 📌 Подтверждение смены email
-	async changeEmailConfirm(dto: ChangeEmailConfirmDto) {
-		const { token } = dto
-
-		try {
-			// Верифицируем токен
-			const payload = this.jwtService.verify(token)
-			if (payload.type !== 'email_change') {
-				throw new BadRequestException('Invalid token type')
-			}
-
-			const newEmail = payload.newEmail
-
-			// Проверяем, что токен не истек (дополнительная проверка)
-			const now = Math.floor(Date.now() / 1000)
-			if (now - payload.iat > 3600) { // 1 час в секундах
-				throw new BadRequestException('Token has expired')
-			}
-
-			// Проверяем существование пользователя
-			const user = await this.prisma.user.findUnique({ where: { id: payload.id } })
-			if (!user) throw new BadRequestException('User not found')
-
-			// Проверяем, что текущий email пользователя совпадает с тем, что в токене
-			if (user.email !== payload.currentEmail) {
-				throw new BadRequestException('Email verification failed')
-			}
-
-			// Проверяем, не занят ли новый email (дополнительная проверка)
-			const existingUser = await this.prisma.user.findUnique({ where: { email: newEmail } })
-			if (existingUser) throw new BadRequestException('Email already in use')
-
-			// Обновляем email в транзакции
-			await this.prisma.$transaction(async (prisma) => {
-				await prisma.user.update({
-					where: { id: payload.id },
-					data: { email: newEmail },
-				})
-			})
-
-			return { message: 'Email updated successfully' }
-		} catch (error) {
-			if (error instanceof BadRequestException) {
-				throw error
-			}
-			throw new BadRequestException('Invalid or expired token')
-		}
-	}
+      return { message: 'Email updated successfully' };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Invalid or expired token');
+    }
+  }
 }

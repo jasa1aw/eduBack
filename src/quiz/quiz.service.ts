@@ -1,6 +1,15 @@
 import { PrismaService } from '@/prisma/prisma.service'
-import { AddQuestionDto, CreateTestDto, UpdateQuestionDto, UpdateTestDto } from '@/src/dto/quiz.dto'
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  AddQuestionDto,
+  CreateTestDto,
+  UpdateQuestionDto,
+  UpdateTestDto,
+} from '@/src/dto/quiz.dto'
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
 import { AnswerStatus, AttemptStatus, QuestionType } from '@prisma/client'
 
 import { Response } from 'express'
@@ -10,124 +19,127 @@ import * as PDFDocument from 'pdfkit'
 
 // Interface for detailed test results
 export interface DetailedTestResult {
-	questionId: string
-	questionTitle: string
-	questionType: QuestionType
-	options: string[]
-	correctAnswers: string[]
-	userSelectedAnswers: string[]
-	userAnswer: string | null
-	isCorrect: boolean | null
-	explanation: string | null
+  questionId: string
+  questionTitle: string
+  questionType: QuestionType
+  options: string[]
+  correctAnswers: string[]
+  userSelectedAnswers: string[]
+  userAnswer: string | null
+  isCorrect: boolean | null
+  explanation: string | null
 }
 
 // Interface for practice test submission response
 export interface PracticeTestResponse {
-	message: string
-	score: number
-	totalQuestions: number
-	correctAnswers: number
-	incorrectAnswers: number
-	detailedResults: DetailedTestResult[]
-	showAnswers: true
+  message: string
+  score: number
+  totalQuestions: number
+  correctAnswers: number
+  incorrectAnswers: number
+  detailedResults: DetailedTestResult[]
+  showAnswers: true
 }
 
 // Interface for exam test submission response
 export interface ExamTestResponse {
-	message: string
-	score: number
-	status: AttemptStatus
-	timeElapsed: number
-	timeLimit: number
-	showAnswers: boolean
-	detailedResults: DetailedTestResult[] | null
+  message: string
+  score: number
+  status: AttemptStatus
+  timeElapsed: number
+  timeLimit: number
+  showAnswers: boolean
+  detailedResults: DetailedTestResult[] | null
 }
 
 // Interface for practice test results response
 export interface PracticeTestResultsResponse {
-	testTitle: string
-	score: number
-	totalQuestions: number
-	correctAnswers: number
-	incorrectAnswers: number
-	showAnswers: true
-	mode: 'PRACTICE'
-	results: DetailedTestResult[]
+  testTitle: string
+  score: number
+  totalQuestions: number
+  correctAnswers: number
+  incorrectAnswers: number
+  showAnswers: true
+  mode: 'PRACTICE'
+  results: DetailedTestResult[]
 }
 
-// Interface for exam test results response  
+// Interface for exam test results response
 export interface ExamTestResultsResponse {
-	testTitle: string
-	score: number
-	status: AttemptStatus
-	showAnswers: boolean
-	mode: 'EXAM'
-	results?: DetailedTestResult[]
+  testTitle: string
+  score: number
+  status: AttemptStatus
+  showAnswers: boolean
+  mode: 'EXAM'
+  totalQuestions: number
+  correctAnswers: number
+  incorrectAnswers: number
+  results?: DetailedTestResult[]
 }
 
 // Interface for single answer submission
 export interface SingleAnswerRequest {
-	questionId: string
-	selectedAnswers?: string[]
-	userAnswer?: string
+  questionId: string
+  selectedAnswers?: string[]
+  userAnswer?: string
 }
 
 // Interface for single answer response
 export interface SingleAnswerResponse {
-	success: boolean
-	message: string
-	isCorrect?: boolean
-	questionId: string
-	nextQuestionId?: string
-	nextQuestion?: {
-		id: string
-		title: string
-		type: QuestionType
-		options: string[]
-		explanation?: string
-		weight: number
-	}
+  success: boolean
+  message: string
+  isCorrect?: boolean
+  questionId: string
+  nextQuestionId?: string
+  nextQuestion?: {
+    id: string
+    title: string
+    type: QuestionType
+    options: string[]
+    explanation?: string
+    weight: number
+  }
 }
 
 // Interface for resume session response
 export interface ResumeResponse {
-	attemptId: string
-	mode: 'practice' | 'exam'
-	answered: AnsweredQuestion[]
-	question: QuestionData | null
-	resumeTargetQuestionId: string | null
-	isCompleted: boolean
-	currentAnswer?: AnsweredQuestion | null
+  attemptId: string
+  mode: 'practice' | 'exam'
+  answered: AnsweredQuestion[]
+  question: QuestionData | null
+  resumeTargetQuestionId: string | null
+  isCompleted: boolean
+  currentAnswer?: AnsweredQuestion | null
 }
 
 // Interface for answered question data
 export interface AnsweredQuestion {
-	questionId: string
-	selectedAnswers?: string[]
-	userAnswer?: string
-	isCorrect?: boolean
-	timestamp: Date
+  questionId: string
+  selectedAnswers?: string[]
+  userAnswer?: string
+  isCorrect?: boolean
+  timestamp: Date
 }
 
 // Interface for question data
 export interface QuestionData {
-	id: string
-	title: string
-	type: QuestionType
-	options: string[]
-	explanation?: string
-	weight: number
+  id: string
+  title: string
+  type: QuestionType
+  options: string[]
+  explanation?: string
+  weight: number
 }
 
 // Interface for question with answers
 export interface QuestionWithAnswers {
-	id: string
-	title: string
-	type: QuestionType
-	options: string[]
-	weight: number
-	selectedAnswers?: string[]
-	userAnswer?: string
+  id: string
+  title: string
+  type: QuestionType
+  options: string[]
+  weight: number
+  selectedAnswers?: string[]
+  userAnswer?: string
 }
 
 @Injectable()

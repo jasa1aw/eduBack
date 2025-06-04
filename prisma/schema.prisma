@@ -12,6 +12,7 @@ model User {
   id                        String                   @id @default(uuid())
   email                     String                   @unique
   name                      String?
+  institution               String?
   role                      Role                     @default(STUDENT)
   password                  String
   isVerified                Boolean                  @default(false)
@@ -19,12 +20,8 @@ model User {
   tests                     Test[]
   results                   Result[]
   attempts                  Attempt[]
-  createdGames              Game[]                   @relation("creator")
-  playingGames              Game[]                   @relation("players")
   createdCompetitions       Competition[]
   competitionParticipations CompetitionParticipant[]
-  invites                   Invite[]                 @relation("UserInvites")
-  messages                  Message[]
   createdAt                 DateTime                 @default(now())
   updatedAt                 DateTime                 @updatedAt
   emailVerifications        EmailVerification[]
@@ -210,55 +207,6 @@ model TeamChatMessage {
   createdAt     DateTime               @default(now())
 }
 
-// 🎮 Game model
-model Game {
-  id        String   @id @default(uuid())
-  creator   User     @relation("creator", fields: [creatorId], references: [id], onDelete: Cascade)
-  creatorId String
-  isPublic  Boolean  @default(false)
-  players   User[]   @relation("players")
-  chat      Chat?
-  invites   Invite[] @relation("GameInvites")
-  createdAt DateTime @default(now())
-}
-
-// 💬 Chat model
-model Chat {
-  id       String    @id @default(uuid())
-  game     Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  gameId   String    @unique
-  messages Message[]
-}
-
-// 📨 Message model
-model Message {
-  id         String   @id @default(uuid())
-  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  chatId     String
-  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  senderId   String
-  content    String
-  readStatus Boolean  @default(false)
-  createdAt  DateTime @default(now())
-}
-
-enum InviteStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-}
-
-// 📩 Invite model
-model Invite {
-  id     String       @id @default(uuid())
-  game   Game         @relation("GameInvites", fields: [gameId], references: [id], onDelete: Cascade)
-  gameId String
-  email  String?
-  token  String       @unique
-  user   User?        @relation("UserInvites", fields: [userId], references: [id], onDelete: Cascade)
-  userId String?
-  status InviteStatus @default(PENDING)
-}
 
 model EmailVerification {
   id        String   @id @default(uuid())
